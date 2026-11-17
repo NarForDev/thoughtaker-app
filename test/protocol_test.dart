@@ -65,7 +65,8 @@ void main() {
 
   test('verify accepts a well-formed chunk and reads its metadata', () {
     final f = buildChunk(storeId: 0xA1B2C3D4, seq: 0x1A, bookmarks: [1500, 42000]);
-    final h = ChunkHeader.verify(f, storeId: 0xA1B2C3D4, seq: 0x1A);
+    final h = ChunkHeader.verify(f, seq: 0x1A);
+    expect(h.storeId, 0xA1B2C3D4); // from the header, so chunks from an older store_id still sync
     expect(h.bootId, 7);
     expect(h.startUptimeMs, 123456);
     expect(h.epochOffsetMs, 1700000000000);
@@ -77,12 +78,11 @@ void main() {
 
   test('verify rejects corruption, wrong identity and truncation', () {
     final f = buildChunk(storeId: 1, seq: 2);
-    expect(() => ChunkHeader.verify(Uint8List.fromList(f)..[700] ^= 1, storeId: 1, seq: 2), throwsFormatException);
-    expect(() => ChunkHeader.verify(Uint8List.fromList(f)..[97] = 1, storeId: 1, seq: 2), throwsFormatException);
-    expect(() => ChunkHeader.verify(f, storeId: 1, seq: 3), throwsFormatException);
-    expect(() => ChunkHeader.verify(f, storeId: 9, seq: 2), throwsFormatException);
-    expect(() => ChunkHeader.verify(Uint8List.sublistView(f, 0, f.length - 256), storeId: 1, seq: 2),
-        throwsFormatException);
+    expect(() => ChunkHeader.verify(Uint8List.fromList(f)..[700] ^= 1, seq: 2), throwsFormatException);
+    expect(() => ChunkHeader.verify(Uint8List.fromList(f)..[97] = 1, seq: 2), throwsFormatException);
+    expect(() => ChunkHeader.verify(Uint8List.fromList(f)..[64] ^= 1, seq: 2), throwsFormatException); // crc covers store_id
+    expect(() => ChunkHeader.verify(f, seq: 3), throwsFormatException);
+    expect(() => ChunkHeader.verify(Uint8List.sublistView(f, 0, f.length - 256), seq: 2), throwsFormatException);
   });
 
   test('status and LIST payloads parse per 3.3', () {

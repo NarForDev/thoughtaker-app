@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:isolate';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:just_audio/just_audio.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -33,7 +33,8 @@ class _ChunkScreenState extends State<ChunkScreen> {
   Future<void> _load() async {
     try {
       final bytes = await File(widget.chunk.path).readAsBytes();
-      final wav = await Isolate.run(() => chunkToPcmWav(bytes));
+      // A top-level tear-off: a closure here would drag this State (player, db) into the isolate message.
+      final wav = await compute(chunkToPcmWav, bytes);
       final tmp = File('${(await getTemporaryDirectory()).path}/playback.wav');
       await tmp.writeAsBytes(wav, flush: true);
       await _player.setFilePath(tmp.path);

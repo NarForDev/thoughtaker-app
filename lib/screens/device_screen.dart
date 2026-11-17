@@ -35,13 +35,22 @@ class DeviceScreen extends StatelessWidget {
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 FilledButton.icon(
-                  onPressed: idle ? p.syncNow : null,
-                  icon: const Icon(Icons.sync),
-                  label: Text(p.connected ? 'Sync now' : (p.hasDevice ? 'Connect' : 'Pair pendant')),
+                  onPressed: idle ? (p.hasDevice ? p.syncNow : p.scan) : null,
+                  icon: Icon(p.hasDevice ? Icons.sync : Icons.bluetooth_searching),
+                  label: Text(p.connected ? 'Sync now' : (p.hasDevice ? 'Connect' : 'Find pendants')),
                 ),
                 if (p.connected) OutlinedButton(onPressed: p.disconnect, child: const Text('Disconnect')),
                 if (!p.connected && p.hasDevice && idle) TextButton(onPressed: p.forget, child: const Text('Forget')),
               ]),
+              if (!p.hasDevice)
+                for (final d in p.found)
+                  ListTile(
+                    leading: const Icon(Icons.bluetooth),
+                    title: Text(d.name ?? 'Unnamed'),
+                    subtitle: Text(d.deviceId),
+                    trailing: const Text('Pair'),
+                    onTap: idle ? () => p.pair(d.deviceId) : null,
+                  ),
               if (s != null) ...[
                 const SizedBox(height: 12),
                 SwitchListTile(

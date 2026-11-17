@@ -19,7 +19,7 @@ Future<void> main() async {
   final db = AppDb(sqlite3.open('${docs.path}/thoughtaker.db'));
   final transcriber =
       OnDeviceTranscriptionService(db, Directory('${(await getApplicationSupportDirectory()).path}/models'))..start();
-  final pendant = PendantController(db, transcriber, chunksDir: chunks, partialDir: partial);
+  final pendant = PendantController(db, transcriber.kick, chunksDir: chunks, partialDir: partial);
   runApp(ThoughtakerApp(db: db, pendant: pendant, transcriber: transcriber));
 }
 

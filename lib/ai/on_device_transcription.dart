@@ -14,7 +14,6 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 import '../adpcm.dart';
 import '../db.dart';
 import '../protocol.dart';
-import 'transcription_service.dart';
 
 const _whisper = 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/bb53ee204431c90d314c1cc08d28d23e5b7927cc';
 
@@ -135,7 +134,7 @@ void freeRecognizer(String modelDir, int address) {
 
 /// Transcribes committed chunks one at a time, newest first, whenever the models are present and the
 /// charging rule allows. The DB is the queue: a chunk is pending until it has a `transcribed` row.
-class OnDeviceTranscriptionService extends ChangeNotifier implements TranscriptionService {
+class OnDeviceTranscriptionService extends ChangeNotifier {
   OnDeviceTranscriptionService(this.db, this.modelDir,
       {Future<bool> Function()? isPluggedIn, Future<List<Segment>> Function(String chunkPath)? recognize})
       : _isPluggedIn = isPluggedIn ?? _platformPluggedIn,
@@ -181,10 +180,6 @@ class OnDeviceTranscriptionService extends ChangeNotifier implements Transcripti
     _poll?.cancel();
     super.dispose();
   }
-
-  /// Called by the sync loop after each committed chunk; the queue picks it up from the DB.
-  @override
-  Future<void> transcribe(int chunkId, String chunkPath) => kick();
 
   Future<void> kick() {
     _again = true;

@@ -110,8 +110,8 @@ class ChunkHeader {
   int get durationMs => dataSize ~/ blockSize * samplesPerBlock * 1000 ~/ sampleRate;
 
   /// Parses and checks a complete chunk file received from the device (trust boundary):
-  /// format fields, identity, length and CRC must all match the contract.
-  static ChunkHeader verify(Uint8List f, {required int storeId, required int seq}) {
+  /// format fields, seq, length and CRC must all match the contract. store_id is taken from the header (1.3).
+  static ChunkHeader verify(Uint8List f, {required int seq}) {
     if (f.length < headerSize + blockSize) throw const FormatException('chunk too short');
     final d = _le(f);
     String tag(int o) => String.fromCharCodes(f, o, o + 4);
@@ -126,14 +126,14 @@ class ChunkHeader {
         f.length != headerSize + dataSize) {
       throw const FormatException('bad data size');
     }
-    if (u32at(64) != storeId || u32at(68) != seq) throw const FormatException('chunk identity mismatch');
+    if (u32at(68) != seq) throw const FormatException('chunk identity mismatch');
     final header = Uint8List.fromList(f.sublist(0, headerSize))..fillRange(92, 96, 0);
     final crc = crc32(header, crc32(Uint8List.sublistView(f, headerSize)));
     if (crc != u32at(92)) throw const FormatException('crc mismatch');
     final count = f[96] > 16 ? 16 : f[96];
     return ChunkHeader._(
       u16(62),
-      storeId,
+      u32at(64),
       seq,
       u32at(72),
       d.getUint64(76, Endian.little),

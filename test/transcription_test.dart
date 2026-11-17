@@ -95,7 +95,7 @@ void main() {
       expect(db.untranscribedCount(), 3);
 
       plugged = true;
-      await Future.wait([svc.kick(), svc.transcribe(0, ''), svc.kick()]);
+      await Future.wait([svc.kick(), svc.kick(), svc.kick()]);
       expect(order, ['/x/3.wav', '/x/2.wav', '/x/1.wav']);
       expect(maxActive, 1);
       expect(db.untranscribedCount(), 0);
@@ -119,7 +119,7 @@ void main() {
       add(1);
       final run = svc.kick();
       add(2);
-      svc.transcribe(0, '');
+      svc.kick();
       await run;
       await svc.kick();
       expect(order.toSet(), {'/x/1.wav', '/x/2.wav'});

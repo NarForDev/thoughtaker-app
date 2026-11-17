@@ -6,17 +6,16 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:universal_ble/universal_ble.dart';
 
-import 'ai/transcription_service.dart';
 import 'db.dart';
 import 'protocol.dart';
 
 const _deviceIdKey = 'device_id';
 
 class PendantController extends ChangeNotifier {
-  PendantController(this.db, this.transcriber, {required this.chunksDir, required this.partialDir});
+  PendantController(this.db, this.onChunkCommitted, {required this.chunksDir, required this.partialDir});
 
   final AppDb db;
-  final TranscriptionService transcriber;
+  final void Function() onChunkCommitted;
   final Directory chunksDir, partialDir;
 
   String? _deviceId;
@@ -25,6 +24,8 @@ class PendantController extends ChangeNotifier {
   DeviceStatus? status;
   double? pullProgress; // 0..1 of the chunk being pulled
   int chunksStored = 0; // bumps on every commit so listeners re-query the DB
+  List<BleDevice> found = []; // pendants seen by the last scan, for the user to pick from
+  String? _picked;
 
   final _subs = <StreamSubscription>[];
   Future<void> _tail = Future.value();
@@ -58,6 +59,14 @@ class PendantController extends ChangeNotifier {
   /// Connects if needed, then syncs everything pending.
   Future<void> syncNow() => _guard('Sync', _sync);
 
+  /// Lists nearby pendants in [found]; the user picks one with [pair].
+  Future<void> scan() => _guard('Scan', _scan);
+
+  Future<void> pair(String deviceId) {
+    _picked = deviceId;
+    return syncNow();
+  }
+
   Future<void> setMute(bool muted) => _guard('Mute', () async {
         await _request(opSetMute, [muted ? 1 : 0]);
         await _refreshStatus();
@@ -78,13 +87,15 @@ class PendantController extends ChangeNotifier {
   Future<void> forget() async {
     await disconnect();
     db.setSetting(_deviceIdKey, null);
+    _picked = null;
     _say('Forgotten. Power-cycle the pendant to pair again.');
   }
 
   Future<void> _connect() async {
     if (connected) return;
     await UniversalBle.requestPermissions();
-    final id = db.setting(_deviceIdKey) ?? await _scan();
+    final saved = db.setting(_deviceIdKey);
+    final id = saved ?? _picked ?? (throw StateError('pick a pendant first'));
     _say('Connecting');
     await UniversalBle.connect(id, timeout: const Duration(seconds: 20));
     _deviceId = id;
@@ -104,10 +115,14 @@ class PendantController extends ChangeNotifier {
       if (mtu < minMtu) throw StateError('MTU $mtu is below $minMtu');
       await UniversalBle.subscribeNotifications(id, serviceUuid, txUuid);
       connected = true;
-      db.setSetting(_deviceIdKey, id);
       await _request(opSetTime, u64(DateTime.now().millisecondsSinceEpoch));
       final s = await _refreshStatus();
       if (s.protoVersion != 1) throw StateError('pendant speaks protocol v${s.protoVersion}, app needs v1');
+      // 2.3: a pendant only takes a new bond right after power-on, so one that is not in that window is not the user's.
+      if (saved == null && !s.pairingWindowOpen) {
+        throw StateError('that pendant is not in pairing mode; power-cycle it, then pair within 2 minutes');
+      }
+      db.setSetting(_deviceIdKey, id);
       // Lets chunks recorded earlier in this boot (time_synced clear) get an exact time later.
       db.saveBootOffset(s.storeId, s.bootId, s.receivedAtMs - s.uptimeMs);
       _say('Connected');
@@ -117,20 +132,23 @@ class PendantController extends ChangeNotifier {
     }
   }
 
-  Future<String> _scan() async {
-    _say('Scanning for the pendant');
-    final found = Completer<String>();
+  Future<void> _scan() async {
+    await UniversalBle.requestPermissions();
+    found = [];
+    _say('Scanning for pendants');
     final sub = UniversalBle.scanStream.listen((d) {
-      if (!found.isCompleted) found.complete(d.deviceId);
+      if (found.any((f) => f.deviceId == d.deviceId)) return;
+      found = [...found, d];
+      notifyListeners();
     });
     try {
       await UniversalBle.startScan(scanFilter: ScanFilter(withServices: [serviceUuid]));
-      return await found.future.timeout(const Duration(seconds: 15),
-          onTimeout: () => throw TimeoutException('no pendant found; is it on and in range?'));
+      await Future<void>.delayed(const Duration(seconds: 6));
     } finally {
       await sub.cancel();
       await UniversalBle.stopScan().catchError((_) {});
     }
+    _say(found.isEmpty ? 'No pendant found; is it on and in range?' : 'Tap your pendant to pair it');
   }
 
   void _dropLink(String why) {
@@ -231,17 +249,32 @@ class PendantController extends ChangeNotifier {
     final id = _deviceId!;
     await UniversalBle.requestConnectionPriority(id, BleConnectionPriority.highPerformance).catchError((_) {});
     final failed = <int>{};
+    var stalled = false;
     try {
       while (true) {
         final (total, entries) = parseList(await _request(opList, [255], timeout: const Duration(seconds: 10)));
         final todo = entries.where((e) => !failed.contains(e.seq)).toList();
-        if (total == 0 || todo.isEmpty) break;
+        if (total == 0 || todo.isEmpty) {
+          // shortcut: LIST has no start offset, so a full page of failed chunks hides the rest; needs a LIST cursor.
+          stalled = total > entries.length;
+          break;
+        }
         for (final e in todo) {
-          if (!await _syncChunk(e)) failed.add(e.seq);
+          bool ok;
+          try {
+            ok = await _syncChunk(e);
+          } on DeviceError {
+            ok = false; // e.g. ERR_IO on one bad file: skip it rather than stall every later chunk
+          }
+          if (!ok) failed.add(e.seq);
         }
       }
       await _refreshStatus();
-      _say(failed.isEmpty ? 'Synced' : 'Synced; ${failed.length} chunk(s) failed verification and stay on the pendant');
+      _say(stalled
+          ? 'Sync stalled: ${failed.length} chunk(s) could not be read and block the rest'
+          : failed.isEmpty
+              ? 'Synced'
+              : 'Synced; ${failed.length} chunk(s) could not be read and stay on the pendant');
     } finally {
       syncing = false;
       pullProgress = null;
@@ -254,16 +287,16 @@ class PendantController extends ChangeNotifier {
 
   /// Pulls, verifies, commits and acks one chunk. Returns false if it could not be verified.
   Future<bool> _syncChunk(ListEntry e) async {
-    final storeId = status!.storeId;
-    final name = '${storeId.toRadixString(16).padLeft(8, '0')}_${seqHex(e.seq)}';
-    final stored = db.chunkCrc(storeId, e.seq);
+    String name(int storeId) => '${storeId.toRadixString(16).padLeft(8, '0')}_${seqHex(e.seq)}';
+    // Usually the current store; a chunk recorded before a flash erase carries an older one (1.3).
+    final stored = db.chunkCrc(status!.storeId, e.seq);
     if (stored != null) {
       await _request(opAck, [...u32(e.seq), ...u32(stored)]); // committed earlier, ACK reply was lost
       return true;
     }
     // Bounds the memory and disk we give to one device-reported size.
     if (e.size < headerSize + blockSize || e.size > headerSize + maxBlocks * blockSize) return false;
-    final part = File('${partialDir.path}/$name.part');
+    final part = File('${partialDir.path}/${name(status!.storeId)}.part');
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         await _pull(e, part);
@@ -275,15 +308,22 @@ class PendantController extends ChangeNotifier {
       final bytes = await part.readAsBytes();
       final ChunkHeader h;
       try {
-        h = ChunkHeader.verify(bytes, storeId: storeId, seq: e.seq);
+        h = ChunkHeader.verify(bytes, seq: e.seq);
       } on FormatException {
         await part.delete(); // 3.5: bad crc -> pull again from offset 0
         continue;
       }
-      final dest = await part.rename('${chunksDir.path}/$name.wav');
-      final offset = (h.flags & flagTimeSynced) != 0 ? h.epochOffsetMs : db.bootOffset(storeId, h.bootId);
-      final chunkId = db.insertChunk(
-        storeId: storeId,
+      final known = db.chunkCrc(h.storeId, e.seq); // older-store chunk committed earlier, ACK reply was lost
+      if (known != null) {
+        await part.delete();
+        if (known != h.crc) return false; // never overwrite a committed chunk or ack audio we did not keep
+        await _request(opAck, [...u32(e.seq), ...u32(h.crc)]);
+        return true;
+      }
+      final dest = await part.rename('${chunksDir.path}/${name(h.storeId)}.wav');
+      final offset = (h.flags & flagTimeSynced) != 0 ? h.epochOffsetMs : db.bootOffset(h.storeId, h.bootId);
+      db.insertChunk(
+        storeId: h.storeId,
         seq: e.seq,
         bootId: h.bootId,
         flags: h.flags,
@@ -298,7 +338,7 @@ class PendantController extends ChangeNotifier {
       notifyListeners();
       // Only now, with the file fsynced and the row committed, may the device delete its copy.
       await _request(opAck, [...u32(e.seq), ...u32(h.crc)]);
-      transcriber.transcribe(chunkId, dest.path).catchError((Object err) => debugPrint('transcribe $chunkId: $err'));
+      onChunkCommitted();
       return true;
     }
     return false;
