@@ -49,7 +49,7 @@ void main() {
 
   test('items are saved per chunk and vanish when the chunk is re-transcribed', () {
     final c = chunk(1, startMs: 1000);
-    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'hello'), (startMs: 1000, endMs: 2000, text: "I'll send it")]);
+    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'hello', voice: null), (startMs: 1000, endMs: 2000, text: "I'll send it", voice: null)]);
     expect(db.nextUnextracted()?.id, c);
     final seg = db.segments(c)[1]['id'] as int;
     db.saveItems(c, [(segmentId: seg, kind: 'my_promise', text: 'Send it', dueMs: null)]);
@@ -58,7 +58,7 @@ void main() {
     expect((item.kind, item.atMs, item.saidMs, item.quote), ('my_promise', 1000, 2000, "I'll send it"));
     db.setItemState(item.id, 'done');
     expect(db.items(state: 'open'), isEmpty);
-    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'again')]);
+    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'again', voice: null)]);
     expect(db.items(), isEmpty);
     expect(db.nextUnextracted()?.id, c);
   });
@@ -70,7 +70,7 @@ void main() {
 
   test('the service drains the queue through generate and stops when not allowed', () async {
     final c = chunk(1);
-    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Call mum tonight')]);
+    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Call mum tonight', voice: null)]);
     var allowed = false;
     final prompts = <String>[];
     final s = UnderstandingService(db, Directory.systemTemp, mayRunNow: () async => allowed, generate: (system, user) async {
@@ -87,7 +87,7 @@ void main() {
 
   Item item(String kind, {int? dueMs}) {
     final c = chunk(9);
-    db.saveTranscript(c, [(startMs: 0, endMs: 1, text: 'x')]);
+    db.saveTranscript(c, [(startMs: 0, endMs: 1, text: 'x', voice: null)]);
     db.saveItems(c, [(segmentId: db.segments(c).single['id'] as int, kind: kind, text: 'Send the deck', dueMs: dueMs)]);
     return db.items().single;
   }

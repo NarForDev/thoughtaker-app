@@ -44,10 +44,10 @@ void main() {
   test('saveTranscript is searchable, replaces on rerun and marks the chunk done', () {
     final id = add(1);
     expect(db.isTranscribed(id), isFalse);
-    db.saveTranscript(id, [(startMs: 1000, endMs: 2500, text: 'kal subah budget email bhejna hai')]);
+    db.saveTranscript(id, [(startMs: 1000, endMs: 2500, text: 'kal subah budget email bhejna hai', voice: null)]);
     expect(db.isTranscribed(id), isTrue);
     expect(db.search('budget').single.startMs, 1000);
-    db.saveTranscript(id, [(startMs: 3000, endMs: 4000, text: 'call Asha on Friday')]);
+    db.saveTranscript(id, [(startMs: 3000, endMs: 4000, text: 'call Asha on Friday', voice: null)]);
     expect(db.search('budget'), isEmpty);
     expect(db.search('Asha').single.startMs, 3000);
     expect(db.segments(id).single['end_ms'], 4000);
@@ -57,7 +57,7 @@ void main() {
   });
 
   test('saveTranscript rolls back on failure', () {
-    expect(() => db.saveTranscript(999, [(startMs: 0, endMs: 1, text: 'orphan')]), throwsA(isA<SqliteException>()));
+    expect(() => db.saveTranscript(999, [(startMs: 0, endMs: 1, text: 'orphan', voice: null)]), throwsA(isA<SqliteException>()));
     expect(db.db.select('SELECT * FROM transcript_segments'), isEmpty);
   });
 
@@ -80,7 +80,7 @@ void main() {
         active--;
         if (failWith != null) throw failWith!;
         order.add(path);
-        return [(startMs: 0, endMs: 900, text: 'hello $path')];
+        return [(startMs: 0, endMs: 900, text: 'hello $path', voice: null)];
       })
         ..modelsReady = true;
     });

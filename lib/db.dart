@@ -1,7 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:sqlite3/sqlite3.dart';
 
+import 'voices.dart';
+
 // sqlite3 (not sqflite) because it bundles its own SQLite with FTS5; Android's system SQLite may lack it.
-typedef Segment = ({int startMs, int endMs, String text});
+/// [voice] is a speaker embedding, present only for regions long enough to tell voices apart.
+typedef Segment = ({int startMs, int endMs, String text, Float32List? voice});
 
 class Chunk {
   Chunk(Row r)
@@ -109,6 +114,12 @@ class AppDb {
         state TEXT NOT NULL DEFAULT 'open',
         remind_ms INTEGER);
       CREATE INDEX IF NOT EXISTS items_segment ON items(segment_id);
+      CREATE TABLE IF NOT EXISTS speakers(id INTEGER PRIMARY KEY, name TEXT NOT NULL, centroid BLOB NOT NULL, n INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS voiceprints(
+        segment_id INTEGER PRIMARY KEY REFERENCES transcript_segments(id) ON DELETE CASCADE,
+        embedding BLOB NOT NULL,
+        speaker_id INTEGER REFERENCES speakers(id));
+      CREATE TABLE IF NOT EXISTS voice_samples(id INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
       CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
         text, speaker, content='transcript_segments', content_rowid='id');
       CREATE TRIGGER IF NOT EXISTS segments_ai AFTER INSERT ON transcript_segments BEGIN
@@ -188,10 +199,17 @@ class AppDb {
     try {
       db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]); // cascades to its items
       db.execute('DELETE FROM extracted WHERE chunk_id = ?', [chunkId]);
-      final insert =
-          db.prepare('INSERT INTO transcript_segments(chunk_id, start_ms, end_ms, text) VALUES (?, ?, ?, ?)');
+      final mine = _voiceSamples();
+      final insert = db.prepare(
+          'INSERT INTO transcript_segments(chunk_id, start_ms, end_ms, speaker, text) VALUES (?, ?, ?, ?, ?)');
       for (final s in segments) {
-        insert.execute([chunkId, s.startMs, s.endMs, s.text]);
+        final v = s.voice;
+        final speakerId = v == null ? null : _assignSpeaker(v);
+        insert.execute([chunkId, s.startMs, s.endMs, v == null ? null : _label(v, mine, speakerId!), s.text]);
+        if (v != null) {
+          db.execute('INSERT INTO voiceprints(segment_id, embedding, speaker_id) VALUES (?, ?, ?)',
+              [db.lastInsertRowId, voiceBytes(v), speakerId]);
+        }
       }
       insert.close();
       db.execute('INSERT OR IGNORE INTO transcribed(chunk_id) VALUES (?)', [chunkId]);
@@ -245,20 +263,97 @@ class AppDb {
 
   void setReminder(int id, int? atMs) => db.execute('UPDATE items SET remind_ms = ? WHERE id = ?', [atMs, id]);
 
-  List<SearchHit> search(String query) {
+  List<Float32List> _voiceSamples() =>
+      [for (final r in db.select('SELECT embedding FROM voice_samples')) voiceFromBytes(r['embedding'])];
+
+  String _label(Float32List voice, List<Float32List> mine, int speakerId) => isMyVoice(voice, mine)
+      ? 'You'
+      : db.select('SELECT name FROM speakers WHERE id = ?', [speakerId]).first['name'] as String;
+
+  /// Adds [voice] to the nearest known speaker, or starts a new "Person N".
+  int _assignSpeaker(Float32List voice) {
+    final rows = db.select('SELECT id, centroid, n FROM speakers');
+    final id = nearestSpeaker({for (final r in rows) r['id'] as int: voiceFromBytes(r['centroid'])}, voice);
+    if (id == null) {
+      db.execute("INSERT INTO speakers(name, centroid, n) SELECT 'Person ' || (coalesce(max(id), 0) + 1), ?, 1 "
+          'FROM speakers', [voiceBytes(voice)]);
+      return db.lastInsertRowId;
+    }
+    final r = rows.firstWhere((r) => r['id'] == id);
+    final n = r['n'] as int;
+    db.execute('UPDATE speakers SET centroid = ?, n = ? WHERE id = ?',
+        [voiceBytes(addToMean(voiceFromBytes(r['centroid']), n, voice)), n + 1, id]);
+    return id;
+  }
+
+  /// Rewrites every voiced line's speaker from the current profile and speaker names.
+  void _relabel() {
+    final mine = _voiceSamples();
+    db.execute('BEGIN');
+    try {
+      for (final r in db.select('SELECT segment_id, embedding, speaker_id FROM voiceprints')) {
+        db.execute('UPDATE transcript_segments SET speaker = ?1 WHERE id = ?2 AND speaker IS NOT ?1',
+            [_label(voiceFromBytes(r['embedding']), mine, r['speaker_id']), r['segment_id']]);
+      }
+      db.execute('COMMIT');
+    } catch (_) {
+      db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  /// The speaker heard on this line, or null when it was too short to recognise.
+  int? lineSpeaker(int segmentId) =>
+      db.select('SELECT speaker_id FROM voiceprints WHERE segment_id = ?', [segmentId]).firstOrNull?['speaker_id'];
+
+  int voiceSampleCount() => db.select('SELECT count(*) AS n FROM voice_samples').first['n'];
+
+  /// "That's me": adds this line's voice to the profile and relabels lines that now match it.
+  void markAsMe(int segmentId) {
+    db.execute('INSERT INTO voice_samples(embedding) SELECT embedding FROM voiceprints WHERE segment_id = ?', [segmentId]);
+    _relabel();
+  }
+
+  void resetVoiceProfile() {
+    db.execute('DELETE FROM voice_samples');
+    _relabel();
+  }
+
+  /// Giving two speakers the same name shows them as one person.
+  void renameSpeaker(int id, String name) {
+    db.execute('UPDATE speakers SET name = ? WHERE id = ?', [name, id]);
+    _relabel();
+  }
+
+  /// Everyone heard so far, for filtering search.
+  List<String> people() => [
+        for (final r in db.select(
+            "SELECT DISTINCT speaker FROM transcript_segments WHERE speaker IS NOT NULL ORDER BY speaker = 'You' DESC, speaker"))
+          r['speaker'] as String,
+      ];
+
+  /// Lines matching [query], said by [speaker] when given. With only a speaker, their lines newest first.
+  List<SearchHit> search(String query, {String? speaker}) {
     // Quote every word so user input is matched literally instead of parsed as FTS5 syntax.
     final match = query
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty)
         .map((w) => '"${w.replaceAll('"', '""')}"')
         .join(' ');
-    if (match.isEmpty) return [];
+    if (match.isEmpty) {
+      if (speaker == null) return [];
+      return db
+          .select('SELECT chunk_id, start_ms, speaker, text AS snippet FROM transcript_segments WHERE speaker = ? '
+              'ORDER BY chunk_id DESC, start_ms DESC LIMIT 200', [speaker])
+          .map(SearchHit.new)
+          .toList();
+    }
     return db
         .select(
             "SELECT s.chunk_id, s.start_ms, s.speaker, snippet(transcript_fts, 0, '[', ']', '…', 12) AS snippet "
             'FROM transcript_fts JOIN transcript_segments s ON s.id = transcript_fts.rowid '
-            'WHERE transcript_fts MATCH ? ORDER BY rank LIMIT 200',
-            [match])
+            'WHERE transcript_fts MATCH ? ${speaker == null ? '' : 'AND s.speaker = ?'} ORDER BY rank LIMIT 200',
+            [match, ?speaker])
         .map(SearchHit.new)
         .toList();
   }

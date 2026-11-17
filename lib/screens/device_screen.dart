@@ -131,7 +131,8 @@ class DeviceScreen extends StatelessWidget {
                   Text(
                       t.downloading
                           ? 'Downloading ${(t.downloadProgress * 100).floor()}%'
-                          : 'Tap to download once, ${(modelBytes / 1e6).round()} MB. Use Wi-Fi.',
+                          : 'Tap to download once, ${(modelBytes / 1e6).round()} MB. Includes the voice model '
+                              'that tells people apart. Use Wi-Fi.',
                       style: TextStyles.caption),
                   if (t.downloading) ...[const SizedBox(height: 8), DottedTrack(value: t.downloadProgress)],
                 ]),
@@ -150,6 +151,37 @@ class DeviceScreen extends StatelessWidget {
               ]),
             ),
             if (t.error != null) Text(t.error!, style: TextStyles.body.copyWith(color: Palette.danger)),
+            const SizedBox(height: 8),
+            StatefulBuilder(builder: (context, setState) {
+              final n = t.db.voiceSampleCount();
+              return ListRow(
+                child: Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('Voice profile', style: TextStyles.label),
+                      const SizedBox(height: 4),
+                      Text(
+                          n == 0
+                              ? "No samples yet. Long-press one of your lines in a conversation and choose That's me."
+                              : '$n sample(s). Your lines are labelled You.',
+                          style: TextStyles.caption),
+                    ]),
+                  ),
+                  if (n > 0)
+                    PillButton(
+                      label: 'Reset',
+                      danger: true,
+                      onPressed: () async {
+                        final ok = await confirmSheet(context,
+                            title: 'Reset voice profile?',
+                            body: 'Your lines stop being labelled You until you mark them again.',
+                            confirm: 'Reset');
+                        if (ok) setState(t.db.resetVoiceProfile);
+                      },
+                    ),
+                ]),
+              );
+            }),
             const SectionHeader('Understanding'),
             if (!understanding.modelReady)
               ListRow(

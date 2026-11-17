@@ -1,5 +1,5 @@
 // On-device transcription: Silero VAD finds speech in each chunk, multilingual Whisper base (int8)
-// transcribes each region. Models are downloaded once into app storage, never bundled in the APK.
+// transcribes each region and 3D-Speaker CAM++ fingerprints the voice in it. Models are downloaded once into app storage, never bundled in the APK.
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
@@ -43,9 +43,19 @@ const List<ModelFile> models = [
     size: 816730,
     sha256: 'b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126',
   ),
+  (
+    name: 'campplus.onnx',
+    url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/'
+        '3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx',
+    size: 28281164,
+    sha256: 'aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2',
+  ),
 ];
 
 final modelBytes = models.fold<int>(0, (n, m) => n + m.size);
+
+// shortcut: shorter regions are left unlabelled; calibrate on the user's own recordings.
+const minVoiceMs = 1500;
 
 const _onlyChargingKey = 'transcribe_only_charging';
 const _power = MethodChannel('thoughtaker/power');
@@ -93,6 +103,21 @@ List<Segment> recognizeChunk(String modelDir, int asrAddress, String chunkPath) 
     ),
     bufferSizeInSeconds: 60,
   );
+  // shortcut: loaded per chunk; keep it alive beside the recognizer if the load shows up in timings.
+  final voices = sherpa.SpeakerEmbeddingExtractor(
+      config: sherpa.SpeakerEmbeddingExtractorConfig(model: '$modelDir/campplus.onnx', numThreads: 2, debug: false));
+  Float32List? voiceOf(Float32List samples) {
+    if (samples.length * 1000 < minVoiceMs * sampleRate) return null;
+    final stream = voices.createStream();
+    try {
+      stream.acceptWaveform(samples: samples, sampleRate: sampleRate);
+      stream.inputFinished();
+      return voices.isReady(stream) ? voices.compute(stream) : null;
+    } finally {
+      stream.free();
+    }
+  }
+
   final out = <Segment>[];
   void takeRegions() {
     while (!vad.isEmpty()) {
@@ -104,7 +129,7 @@ List<Segment> recognizeChunk(String modelDir, int asrAddress, String chunkPath) 
       final text = asr.getResult(stream).text.trim();
       stream.free();
       final (start, end) = segmentMs(region.start, region.samples.length);
-      if (text.isNotEmpty) out.add((startMs: start, endMs: end, text: text));
+      if (text.isNotEmpty) out.add((startMs: start, endMs: end, text: text, voice: voiceOf(region.samples)));
     }
   }
 
@@ -118,6 +143,7 @@ List<Segment> recognizeChunk(String modelDir, int asrAddress, String chunkPath) 
     takeRegions();
   } finally {
     vad.free();
+    voices.free();
   }
   return out;
 }

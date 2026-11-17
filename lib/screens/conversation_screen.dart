@@ -91,6 +91,80 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _player.seek(Duration(milliseconds: t - _offsets[i]), index: i);
   }
 
+  Future<void> _voiceActions(int segmentId, String? speaker) => showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Palette.surface,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        builder: (sheet) {
+          final speakerId = widget.db.lineSpeaker(segmentId);
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(speaker ?? 'Unknown speaker', style: TextStyles.title),
+                const SizedBox(height: 8),
+                if (speakerId == null)
+                  const Text('This line is too short to recognise the voice.', style: TextStyles.body)
+                else if (speaker == 'You')
+                  const Text('Recognised as your voice. Reset the voice profile on the Pendant screen if that is wrong.',
+                      style: TextStyles.body)
+                else
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    PillButton(
+                        label: "That's me",
+                        icon: Icons.record_voice_over_rounded,
+                        light: true,
+                        onPressed: () {
+                          Navigator.pop(sheet);
+                          setState(() => widget.db.markAsMe(segmentId));
+                        }),
+                    PillButton(
+                        label: 'Rename speaker',
+                        icon: Icons.edit_rounded,
+                        onPressed: () {
+                          Navigator.pop(sheet);
+                          _rename(speakerId, speaker);
+                        }),
+                  ]),
+              ]),
+            ),
+          );
+        },
+      );
+
+  Future<void> _rename(int speakerId, String? current) async {
+    final name = TextEditingController(text: current); // not disposed: the closing sheet still reads it
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Palette.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (sheet) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Rename speaker', style: TextStyles.title),
+              const SizedBox(height: 8),
+              const Text('Give two speakers the same name to treat them as one person.', style: TextStyles.body),
+              const SizedBox(height: 16),
+              PillInput(hint: 'Name', controller: name, autofocus: true, onSubmitted: (_) => Navigator.pop(sheet, true)),
+              const SizedBox(height: 24),
+              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                PillButton(label: 'Cancel', onPressed: () => Navigator.pop(sheet, false)),
+                const SizedBox(width: 8),
+                PillButton(label: 'Save', light: true, onPressed: () => Navigator.pop(sheet, true)),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+    final n = name.text.trim();
+    if (ok == true && n.isNotEmpty && mounted) setState(() => widget.db.renameSpeaker(speakerId, n));
+  }
+
   Widget _panel() => ControlPanel(
         child: StreamBuilder<Duration>(
           stream: _player.positionStream,
@@ -165,6 +239,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             lines.add(ListRow(
               marked: marked,
               onTap: () => _seek(at),
+              onLongPress: () => _voiceActions(s['id'] as int, s['speaker'] as String?),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${s['speaker'] ?? 'Unknown'} · ${cs == null ? formatDuration(at) : clockTime(context, cs + ms)}',
                     style: TextStyles.caption),

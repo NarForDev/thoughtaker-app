@@ -38,6 +38,7 @@ Kinds:
 - event: a meeting, appointment or dated plan
 - decision: something that was decided
 - fact: a name, number or fact worth remembering
+Each line starts with who said it. The user's own lines are labelled "You"; anyone else is a name, "Person N" or "Speaker".
 "line" is the number of the transcript line it comes from. "text" is a short plain summary, at most 15 words.
 "due" is the date or date-time it is due or happens, as YYYY-MM-DD or YYYY-MM-DDTHH:MM, or "" if none was said.
 Only list what is actually in the transcript. Small talk gives an empty list.''';

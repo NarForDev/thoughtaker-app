@@ -57,12 +57,13 @@ void main() {
     final segs = db.segments(id);
     // ignore: avoid_print
     print('${t.elapsedMilliseconds} ms for ${pcm.length ~/ 16} ms of audio:\n'
-        '${segs.map((s) => '${s['start_ms']}-${s['end_ms']}: ${s['text']}').join('\n')}');
+        '${segs.map((s) => '${s['start_ms']}-${s['end_ms']} ${s['speaker']}: ${s['text']}').join('\n')}');
     expect(svc.error, isNull);
     expect(db.isTranscribed(id), isTrue);
     expect(db.search('yellow lamps').first.startMs, inInclusiveRange(1500, 2500));
     final secondStart = (32000 + a.length + 48000) * 1000 ~/ sampleRate;
     expect(db.search('lovely child').first.startMs, inInclusiveRange(secondStart - 500, secondStart + 500));
+    expect(segs.first['speaker'], 'Person 1'); // long enough for a voiceprint
   },
       skip: models == null || wavs == null || sherpaDir == null ? 'set TT_MODELS, TT_WAVS and TT_SHERPA' : false,
       timeout: const Timeout(Duration(minutes: 10)));
