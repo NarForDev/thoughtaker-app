@@ -72,11 +72,6 @@ class PendantController extends ChangeNotifier {
         await _refreshStatus();
       });
 
-  Future<void> setWakeWord(bool on) => _guard('Wake word', () async {
-        await _request(opSetWakeWord, [on ? 1 : 0]);
-        await _refreshStatus();
-      });
-
   Future<void> disconnect() async {
     final id = _deviceId;
     _dropLink('Disconnected');
@@ -85,10 +80,13 @@ class PendantController extends ChangeNotifier {
 
   /// Forgets the paired pendant so the next connect scans for one again.
   Future<void> forget() async {
+    final id = db.setting(_deviceIdKey);
     await disconnect();
+    // Drop Android's bond too, so the next pair() makes a fresh one after the pendant's BOOT hold deletes its own.
+    if (id != null) await UniversalBle.unpair(id).catchError((_) {});
     db.setSetting(_deviceIdKey, null);
     _picked = null;
-    _say('Forgotten. Power-cycle the pendant to pair again.');
+    _say("Forgotten. Hold the pendant's BOOT button for 3 s to pair again.");
   }
 
   Future<void> _connect() async {
@@ -106,9 +104,11 @@ class PendantController extends ChangeNotifier {
       ..add(UniversalBle.characteristicValueStream(id, txUuid).listen(_onFrame));
     try {
       // Bond before the first GATT operation; RX/TX need an encrypted link.
+      var pairedNow = false;
       if (await UniversalBle.isPaired(id) != true) {
         _say('Pairing (accept the prompt)');
         await UniversalBle.pair(id, timeout: const Duration(seconds: 60));
+        pairedNow = true;
       }
       await UniversalBle.discoverServices(id);
       final mtu = await UniversalBle.requestMtu(id, 517);
@@ -118,9 +118,10 @@ class PendantController extends ChangeNotifier {
       await _request(opSetTime, u64(DateTime.now().millisecondsSinceEpoch));
       final s = await _refreshStatus();
       if (s.protoVersion != 1) throw StateError('pendant speaks protocol v${s.protoVersion}, app needs v1');
-      // 2.3: a pendant only takes a new bond right after power-on, so one that is not in that window is not the user's.
-      if (saved == null && !s.pairingWindowOpen) {
-        throw StateError('that pendant is not in pairing mode; power-cycle it, then pair within 2 minutes');
+      // 2.3: a pendant takes a new bond only in its pairing window, and bonding closes that window,
+      // so a fresh bond is the proof; an old bond must come with the window open.
+      if (saved == null && !pairedNow && !s.pairingWindowOpen) {
+        throw StateError('that pendant is not in pairing mode; hold its BOOT button for 3 s, then pair within 2 minutes');
       }
       db.setSetting(_deviceIdKey, id);
       // Lets chunks recorded earlier in this boot (time_synced clear) get an exact time later.
@@ -358,7 +359,12 @@ class PendantController extends ChangeNotifier {
             onData: (offset, bytes) {
           // Anything but the next contiguous bytes is dropped; the loop re-pulls from `got` (3.6).
           if (offset != got || offset + bytes.length > end) return;
-          raf.writeFromSync(bytes);
+          try {
+            raf.writeFromSync(bytes);
+          } catch (err) {
+            _fail(err); // e.g. phone storage full: fail the PULL instead of re-requesting the same bytes forever
+            return;
+          }
           got += bytes.length;
         });
         await raf.flush();

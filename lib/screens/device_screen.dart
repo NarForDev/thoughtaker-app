@@ -59,12 +59,6 @@ class DeviceScreen extends StatelessWidget {
                   value: s.muted,
                   onChanged: p.connected && idle ? p.setMute : null,
                 ),
-                SwitchListTile(
-                  title: const Text('Wake word'),
-                  subtitle: const Text('Say it to bookmark a moment'),
-                  value: s.wakeWord,
-                  onChanged: p.connected && idle ? p.setWakeWord : null,
-                ),
                 ListTile(
                   title: const Text('Recording'),
                   trailing: Text(s.recording ? 'Yes' : 'No'),
