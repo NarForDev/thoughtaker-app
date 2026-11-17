@@ -7,9 +7,8 @@ import 'package:sqlite3/sqlite3.dart';
 import 'ai/on_device_transcription.dart';
 import 'db.dart';
 import 'pendant.dart';
-import 'screens/device_screen.dart';
-import 'screens/search_screen.dart';
-import 'screens/timeline_screen.dart';
+import 'screens/home_screen.dart';
+import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,44 +33,8 @@ class ThoughtakerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Thoughtaker',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
-      darkTheme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark)),
-      home: HomeShell(db: db, pendant: pendant, transcriber: transcriber),
-    );
-  }
-}
-
-class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.db, required this.pendant, required this.transcriber});
-
-  final AppDb db;
-  final PendantController pendant;
-  final OnDeviceTranscriptionService transcriber;
-
-  @override
-  State<HomeShell> createState() => _HomeShellState();
-}
-
-class _HomeShellState extends State<HomeShell> {
-  int _tab = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(index: _tab, children: [
-        TimelineScreen(db: widget.db, pendant: widget.pendant),
-        SearchScreen(db: widget.db),
-        DeviceScreen(pendant: widget.pendant, transcriber: widget.transcriber),
-      ]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.timeline), label: 'Timeline'),
-          NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
-          NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Device'),
-        ],
-      ),
+      theme: appTheme,
+      home: HomeScreen(db: db, pendant: pendant, transcriber: transcriber),
     );
   }
 }

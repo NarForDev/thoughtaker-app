@@ -58,7 +58,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             _placed = placeChunks(widget.db.chunks());
           }
           if (_placed.isEmpty) {
-            return const Center(child: Text('No conversations yet.\nPair the pendant on the Device tab.',
+            return const Center(child: Text('No conversations yet.\nPair the pendant from Home.',
                 textAlign: TextAlign.center));
           }
           final rows = <Widget>[];
