@@ -6,6 +6,10 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <!-- Only for the one-time speech model download; audio and transcripts stay on the phone. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Background sync: a foreground service keeps the BLE link alive with the app closed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="Thoughtaker"
         android:allowBackup="false"
@@ -33,6 +37,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

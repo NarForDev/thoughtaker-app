@@ -4,12 +4,16 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:universal_ble/universal_ble.dart';
 
 import 'db.dart';
 import 'protocol.dart';
 
 const _deviceIdKey = 'device_id';
+const _lastSyncKey = 'last_sync_ms';
+const _power = MethodChannel('thoughtaker/power');
+const _minBackoff = Duration(seconds: 30), _maxBackoff = Duration(minutes: 10);
 
 class PendantController extends ChangeNotifier {
   PendantController(this.db, this.onChunkCommitted, {required this.chunksDir, required this.partialDir});
@@ -32,10 +36,29 @@ class PendantController extends ChangeNotifier {
   int _reqId = 0, _pendingOp = 0, _pendingReq = 0;
   Completer<Uint8List>? _pending;
   void Function(int offset, Uint8List bytes)? _onData;
-  Timer? _timer;
+  Timer? _timer, _auto;
   void Function()? _rearm;
+  Duration _backoff = _minBackoff;
 
   bool get hasDevice => db.setting(_deviceIdKey) != null;
+
+  int? get lastSyncMs => int.tryParse(db.setting(_lastSyncKey) ?? '');
+
+  /// Pair once, then this keeps reconnecting and syncing in the background, backing off while the pendant is away.
+  void startAutoSync([Duration delay = Duration.zero]) {
+    _auto?.cancel();
+    _auto = Timer(delay, () async {
+      if (hasDevice) {
+        _keepAlive(true);
+        if (!connected && !busy) await syncNow();
+        _backoff = connected ? _minBackoff : (_backoff * 2 > _maxBackoff ? _maxBackoff : _backoff * 2);
+      }
+      startAutoSync(_backoff);
+    });
+  }
+
+  // The foreground service keeps the process alive; a failure here only means sync pauses with the app.
+  void _keepAlive(bool on) => _power.invokeMethod<void>('keepAlive', on).catchError((_) {});
 
   void _say(String m) {
     message = m;
@@ -86,6 +109,7 @@ class PendantController extends ChangeNotifier {
     if (id != null) await UniversalBle.unpair(id).catchError((_) {});
     db.setSetting(_deviceIdKey, null);
     _picked = null;
+    _keepAlive(false);
     _say("Forgotten. Hold the pendant's BOOT button for 3 s to pair again.");
   }
 
@@ -182,6 +206,7 @@ class PendantController extends ChangeNotifier {
         _onData?.call(d.getUint32(1, Endian.little), Uint8List.sublistView(f, 5));
       case frameEvent when f.length >= 2:
         if (f[1] == eventChunkReady && connected && !busy) syncNow();
+        if (f[1] == eventBookmark) _say('Bookmarked on the pendant');
     }
   }
 
@@ -271,6 +296,7 @@ class PendantController extends ChangeNotifier {
         }
       }
       await _refreshStatus();
+      if (!stalled) db.setSetting(_lastSyncKey, '${DateTime.now().millisecondsSinceEpoch}');
       _say(stalled
           ? 'Sync stalled: ${failed.length} chunk(s) could not be read and block the rest'
           : failed.isEmpty

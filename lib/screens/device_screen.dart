@@ -14,6 +14,12 @@ class DeviceScreen extends StatelessWidget {
 
   static String _gb(int kib) => (kib / 1048576).toStringAsFixed(1);
 
+  static String _ago(int? ms) {
+    if (ms == null) return 'Never synced';
+    final m = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms)).inMinutes;
+    return m < 1 ? 'Synced just now' : (m < 60 ? 'Synced $m min ago' : 'Synced ${m ~/ 60} h ago');
+  }
+
   Widget _stat(String label, String value, String unit) => Tile(
         label: label,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -61,6 +67,7 @@ class DeviceScreen extends StatelessWidget {
             Text(p.connected ? 'Connected' : 'Not connected', textAlign: TextAlign.center, style: TextStyles.title),
             const SizedBox(height: 4),
             Text(p.message, textAlign: TextAlign.center, style: TextStyles.body),
+            if (p.hasDevice) Text(_ago(p.lastSyncMs), textAlign: TextAlign.center, style: TextStyles.caption),
             if (p.syncing) ...[const SizedBox(height: 12), DottedTrack(value: p.pullProgress)],
             if (!p.hasDevice)
               for (final d in p.found)
@@ -141,6 +148,9 @@ class DeviceScreen extends StatelessWidget {
               ]),
             ),
             if (t.error != null) Text(t.error!, style: TextStyles.body.copyWith(color: Palette.danger)),
+            const SizedBox(height: 16),
+            const Text('Link to the pendant is encrypted (bonded BLE). Audio on its SD card is not encrypted until it syncs.',
+                style: TextStyles.caption),
           ],
         );
       },
