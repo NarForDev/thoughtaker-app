@@ -40,6 +40,8 @@ dependencies:
   just_audio: ^0.10.6
   path: ^1.9.1
   universal_ble: ^3.3.0
+  sherpa_onnx: ^2.0.1
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

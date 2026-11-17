@@ -4,7 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-import 'ai/transcription_service.dart';
+import 'ai/on_device_transcription.dart';
 import 'db.dart';
 import 'pendant.dart';
 import 'screens/device_screen.dart';
@@ -17,15 +17,18 @@ Future<void> main() async {
   final chunks = await Directory('${docs.path}/chunks').create(recursive: true);
   final partial = await Directory('${docs.path}/partial').create(recursive: true);
   final db = AppDb(sqlite3.open('${docs.path}/thoughtaker.db'));
-  final pendant = PendantController(db, NoopTranscriptionService(), chunksDir: chunks, partialDir: partial);
-  runApp(ThoughtakerApp(db: db, pendant: pendant));
+  final transcriber =
+      OnDeviceTranscriptionService(db, Directory('${(await getApplicationSupportDirectory()).path}/models'))..start();
+  final pendant = PendantController(db, transcriber, chunksDir: chunks, partialDir: partial);
+  runApp(ThoughtakerApp(db: db, pendant: pendant, transcriber: transcriber));
 }
 
 class ThoughtakerApp extends StatelessWidget {
-  const ThoughtakerApp({super.key, required this.db, required this.pendant});
+  const ThoughtakerApp({super.key, required this.db, required this.pendant, required this.transcriber});
 
   final AppDb db;
   final PendantController pendant;
+  final OnDeviceTranscriptionService transcriber;
 
   @override
   Widget build(BuildContext context) {
@@ -33,16 +36,17 @@ class ThoughtakerApp extends StatelessWidget {
       title: 'Thoughtaker',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
       darkTheme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark)),
-      home: HomeShell(db: db, pendant: pendant),
+      home: HomeShell(db: db, pendant: pendant, transcriber: transcriber),
     );
   }
 }
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.db, required this.pendant});
+  const HomeShell({super.key, required this.db, required this.pendant, required this.transcriber});
 
   final AppDb db;
   final PendantController pendant;
+  final OnDeviceTranscriptionService transcriber;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -57,7 +61,7 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _tab, children: [
         TimelineScreen(db: widget.db, pendant: widget.pendant),
         SearchScreen(db: widget.db),
-        DeviceScreen(pendant: widget.pendant),
+        DeviceScreen(pendant: widget.pendant, transcriber: widget.transcriber),
       ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,

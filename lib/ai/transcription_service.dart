@@ -3,8 +3,3 @@
 abstract class TranscriptionService {
   Future<void> transcribe(int chunkId, String chunkPath);
 }
-
-class NoopTranscriptionService implements TranscriptionService {
-  @override
-  Future<void> transcribe(int chunkId, String chunkPath) async {}
-}

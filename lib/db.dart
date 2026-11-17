@@ -1,6 +1,8 @@
 import 'package:sqlite3/sqlite3.dart';
 
 // sqlite3 (not sqflite) because it bundles its own SQLite with FTS5; Android's system SQLite may lack it.
+typedef Segment = ({int startMs, int endMs, String text});
+
 class Chunk {
   Chunk(Row r)
       : id = r['id'] as int,
@@ -64,6 +66,8 @@ class AppDb {
         end_ms INTEGER NOT NULL,
         speaker TEXT,
         text TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS transcribed(
+        chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE);
       CREATE INDEX IF NOT EXISTS segments_chunk ON transcript_segments(chunk_id, start_ms);
       CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
         text, speaker, content='transcript_segments', content_rowid='id');
@@ -126,6 +130,36 @@ class AppDb {
 
   List<Row> segments(int chunkId) =>
       db.select('SELECT * FROM transcript_segments WHERE chunk_id = ? ORDER BY start_ms', [chunkId]);
+
+  bool isTranscribed(int chunkId) => db.select('SELECT 1 FROM transcribed WHERE chunk_id = ?', [chunkId]).isNotEmpty;
+
+  // Newest first: after a backlog the user wants today's conversations searchable before last week's.
+  Chunk? nextUntranscribed() => db
+      .select('SELECT * FROM chunks WHERE id NOT IN (SELECT chunk_id FROM transcribed) ORDER BY id DESC LIMIT 1')
+      .map(Chunk.new)
+      .firstOrNull;
+
+  int untranscribedCount() =>
+      db.select('SELECT count(*) AS n FROM chunks WHERE id NOT IN (SELECT chunk_id FROM transcribed)').first['n'];
+
+  /// Replaces the chunk's transcript and marks it done, atomically, so a crash never leaves half a transcript.
+  void saveTranscript(int chunkId, List<Segment> segments) {
+    db.execute('BEGIN');
+    try {
+      db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]);
+      final insert =
+          db.prepare('INSERT INTO transcript_segments(chunk_id, start_ms, end_ms, text) VALUES (?, ?, ?, ?)');
+      for (final s in segments) {
+        insert.execute([chunkId, s.startMs, s.endMs, s.text]);
+      }
+      insert.close();
+      db.execute('INSERT OR IGNORE INTO transcribed(chunk_id) VALUES (?)', [chunkId]);
+      db.execute('COMMIT');
+    } catch (_) {
+      db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
 
   List<SearchHit> search(String query) {
     // Quote every word so user input is matched literally instead of parsed as FTS5 syntax.

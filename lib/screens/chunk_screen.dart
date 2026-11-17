@@ -104,7 +104,7 @@ class _ChunkScreenState extends State<ChunkScreen> {
           ],
           const SizedBox(height: 12),
           if (segments.isEmpty)
-            const Text('No transcript yet.')
+            Text(widget.db.isTranscribed(c.id) ? 'No speech found.' : 'No transcript yet.')
           else
             for (final s in segments)
               ListTile(

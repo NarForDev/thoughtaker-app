@@ -1,11 +1,13 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../ai/on_device_transcription.dart';
 import '../pendant.dart';
 
 class DeviceScreen extends StatelessWidget {
-  const DeviceScreen({super.key, required this.pendant});
+  const DeviceScreen({super.key, required this.pendant, required this.transcriber});
 
   final PendantController pendant;
+  final OnDeviceTranscriptionService transcriber;
 
   static String _gb(int kib) => '${(kib / 1048576).toStringAsFixed(1)} GB';
 
@@ -75,6 +77,39 @@ class DeviceScreen extends StatelessWidget {
                 if (s.sdError)
                   const ListTile(leading: Icon(Icons.error_outline), title: Text('SD card error on the pendant')),
               ],
+              const SizedBox(height: 12),
+              ListenableBuilder(
+                listenable: transcriber,
+                builder: (context, _) {
+                  final t = transcriber;
+                  final pending = t.db.untranscribedCount();
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Transcription', style: Theme.of(context).textTheme.titleSmall),
+                    if (!t.modelsReady) ...[
+                      ListTile(
+                        title: const Text('Speech models'),
+                        subtitle: Text(t.downloading
+                            ? 'Downloading ${(t.downloadProgress * 100).floor()}%'
+                            : 'Needed once, ${(modelBytes / 1e6).round()} MB. Use Wi-Fi.'),
+                        trailing: FilledButton(
+                            onPressed: t.downloading ? null : t.downloadModels, child: const Text('Download')),
+                      ),
+                      if (t.downloading) LinearProgressIndicator(value: t.downloadProgress),
+                    ],
+                    SwitchListTile(
+                      title: const Text('Transcribe only while charging'),
+                      value: t.onlyWhileCharging,
+                      onChanged: (v) => t.onlyWhileCharging = v,
+                    ),
+                    ListTile(
+                      title: const Text('Waiting to transcribe'),
+                      subtitle: t.working ? const Text('Transcribing…') : null,
+                      trailing: Text('$pending chunks'),
+                    ),
+                    if (t.error != null) ListTile(leading: const Icon(Icons.error_outline), title: Text(t.error!)),
+                  ]);
+                },
+              ),
             ],
           );
         },
