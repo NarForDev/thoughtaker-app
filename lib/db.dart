@@ -36,6 +36,35 @@ class SearchHit {
   final String snippet;
 }
 
+/// Something worth acting on, pulled from one transcript line.
+class Item {
+  Item(Row r)
+      : id = r['id'] as int,
+        kind = r['kind'] as String,
+        text = r['text'] as String,
+        dueMs = r['due_ms'] as int?,
+        state = r['state'] as String,
+        remindMs = r['remind_ms'] as int?,
+        chunkId = r['chunk_id'] as int,
+        atMs = r['start_ms'] as int,
+        chunkStartMs = r['chunk_start_ms'] as int?,
+        speaker = r['speaker'] as String?,
+        quote = r['quote'] as String;
+
+  final int id, chunkId, atMs; // atMs: offset of the source line in its chunk
+  final String kind, text, state, quote;
+  final int? dueMs, remindMs, chunkStartMs;
+  final String? speaker;
+
+  /// When it was said, if the chunk's time is known.
+  int? get saidMs => chunkStartMs == null ? null : chunkStartMs! + atMs;
+}
+
+typedef NewItem = ({int segmentId, String kind, String text, int? dueMs});
+
+const _itemSelect = 'SELECT i.*, s.chunk_id, s.start_ms, s.speaker, s.text AS quote, c.start_ms AS chunk_start_ms '
+    'FROM items i JOIN transcript_segments s ON s.id = i.segment_id JOIN chunks c ON c.id = s.chunk_id';
+
 class AppDb {
   AppDb(this.db) {
     db.execute('''
@@ -69,6 +98,17 @@ class AppDb {
       CREATE TABLE IF NOT EXISTS transcribed(
         chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE);
       CREATE INDEX IF NOT EXISTS segments_chunk ON transcript_segments(chunk_id, start_ms);
+      CREATE TABLE IF NOT EXISTS extracted(
+        chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE);
+      CREATE TABLE IF NOT EXISTS items(
+        id INTEGER PRIMARY KEY,
+        segment_id INTEGER NOT NULL REFERENCES transcript_segments(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        text TEXT NOT NULL,
+        due_ms INTEGER,
+        state TEXT NOT NULL DEFAULT 'open',
+        remind_ms INTEGER);
+      CREATE INDEX IF NOT EXISTS items_segment ON items(segment_id);
       CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
         text, speaker, content='transcript_segments', content_rowid='id');
       CREATE TRIGGER IF NOT EXISTS segments_ai AFTER INSERT ON transcript_segments BEGIN
@@ -146,7 +186,8 @@ class AppDb {
   void saveTranscript(int chunkId, List<Segment> segments) {
     db.execute('BEGIN');
     try {
-      db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]);
+      db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]); // cascades to its items
+      db.execute('DELETE FROM extracted WHERE chunk_id = ?', [chunkId]);
       final insert =
           db.prepare('INSERT INTO transcript_segments(chunk_id, start_ms, end_ms, text) VALUES (?, ?, ?, ?)');
       for (final s in segments) {
@@ -160,6 +201,49 @@ class AppDb {
       rethrow;
     }
   }
+
+  /// Next transcribed chunk with speech whose items were not pulled out yet, newest first.
+  Chunk? nextUnextracted() => db
+      .select('SELECT c.* FROM chunks c JOIN transcribed t ON t.chunk_id = c.id '
+          'WHERE c.id NOT IN (SELECT chunk_id FROM extracted) '
+          'AND EXISTS (SELECT 1 FROM transcript_segments s WHERE s.chunk_id = c.id) ORDER BY c.id DESC LIMIT 1')
+      .map(Chunk.new)
+      .firstOrNull;
+
+  /// Replaces the chunk's items and marks it done, atomically.
+  void saveItems(int chunkId, List<NewItem> items) {
+    db.execute('BEGIN');
+    try {
+      db.execute('DELETE FROM items WHERE segment_id IN (SELECT id FROM transcript_segments WHERE chunk_id = ?)',
+          [chunkId]);
+      final insert = db.prepare('INSERT INTO items(segment_id, kind, text, due_ms) VALUES (?, ?, ?, ?)');
+      for (final i in items) {
+        insert.execute([i.segmentId, i.kind, i.text, i.dueMs]);
+      }
+      insert.close();
+      db.execute('INSERT OR IGNORE INTO extracted(chunk_id) VALUES (?)', [chunkId]);
+      db.execute('COMMIT');
+    } catch (_) {
+      db.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  /// Items in [state] (all when null): due ones first by date, then newest said first.
+  List<Item> items({String? state}) => db
+      .select('$_itemSelect ${state == null ? '' : 'WHERE i.state = ?'} '
+          'ORDER BY i.due_ms IS NULL, i.due_ms, c.start_ms DESC, s.start_ms DESC', [?state])
+      .map(Item.new)
+      .toList();
+
+  List<Item> chunkItems(int chunkId) =>
+      db.select('$_itemSelect WHERE s.chunk_id = ? ORDER BY s.start_ms', [chunkId]).map(Item.new).toList();
+
+  Item? item(int id) => db.select('$_itemSelect WHERE i.id = ?', [id]).map(Item.new).firstOrNull;
+
+  void setItemState(int id, String state) => db.execute('UPDATE items SET state = ? WHERE id = ?', [state, id]);
+
+  void setReminder(int id, int? atMs) => db.execute('UPDATE items SET remind_ms = ? WHERE id = ?', [atMs, id]);
 
   List<SearchHit> search(String query) {
     // Quote every word so user input is matched literally instead of parsed as FTS5 syntax.

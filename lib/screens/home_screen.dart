@@ -1,7 +1,9 @@
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:material_ui/material_ui.dart';
 
+import '../acting/reminders.dart';
 import '../ai/on_device_transcription.dart';
+import '../ai/understanding.dart';
 import '../conversations.dart';
 import '../db.dart';
 import '../pendant.dart';
@@ -9,6 +11,7 @@ import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'device_screen.dart';
+import 'items_screen.dart';
 import 'search_screen.dart';
 import 'timeline_screen.dart';
 
@@ -27,11 +30,19 @@ import 'timeline_screen.dart';
 
 /// The hub: today's numbers, and tiles that open Timeline, Pendant and Search.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.db, required this.pendant, required this.transcriber});
+  const HomeScreen(
+      {super.key,
+      required this.db,
+      required this.pendant,
+      required this.transcriber,
+      required this.understanding,
+      required this.reminders});
 
   final AppDb db;
   final PendantController pendant;
   final OnDeviceTranscriptionService transcriber;
+  final UnderstandingService understanding;
+  final Reminders reminders;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -46,6 +57,28 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openTimeline() =>
       _push(TimelineScreen(db: widget.db, pendant: widget.pendant, transcriber: widget.transcriber));
 
+  Widget _itemsTile() {
+    final open = widget.db.items(state: 'open');
+    final mine = open.where((i) => i.kind == 'my_promise').length;
+    final u = widget.understanding;
+    return Tile(
+      label: 'Items',
+      onTap: () => _push(ItemsScreen(
+          db: widget.db,
+          understanding: u,
+          transcriber: widget.transcriber,
+          reminders: widget.reminders)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${open.length} open', style: TextStyles.title),
+        Text(
+            u.working
+                ? 'Reading your conversations…'
+                : (mine > 0 ? '$mine promise(s) you made' : 'Tasks, promises, plans and facts'),
+            style: TextStyles.caption),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final hour = DateTime.now().hour;
@@ -59,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: const BoxDecoration(gradient: headerViolet)),
           SafeArea(
             child: ListenableBuilder(
-              listenable: widget.pendant,
+              listenable: Listenable.merge([widget.pendant, widget.understanding]),
               builder: (context, _) {
                 final p = widget.pendant;
                 final s = p.status;
@@ -109,7 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Tile(
                             label: warning ?? 'Pendant',
                             glow: warning == null ? tilePlain : glowEmber,
-                            onTap: () => _push(DeviceScreen(pendant: p, transcriber: widget.transcriber)),
+                            onTap: () => _push(DeviceScreen(
+                                pendant: p, transcriber: widget.transcriber, understanding: widget.understanding)),
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                               Text(p.connected ? 'Connected' : 'Not connected',
                                   style: TextStyles.body.copyWith(color: Palette.textHi)),
@@ -123,6 +157,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ]),
                     ),
+                    const SizedBox(height: 8),
+                    _itemsTile(),
                     if (s != null) ...[
                       const SizedBox(height: 8),
                       PillToggle(label: 'Mute', value: s.muted, onChanged: p.connected && !p.busy ? p.setMute : null),

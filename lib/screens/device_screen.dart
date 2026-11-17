@@ -1,16 +1,18 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../ai/on_device_transcription.dart';
+import '../ai/understanding.dart';
 import '../pendant.dart';
 import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 
 class DeviceScreen extends StatelessWidget {
-  const DeviceScreen({super.key, required this.pendant, required this.transcriber});
+  const DeviceScreen({super.key, required this.pendant, required this.transcriber, required this.understanding});
 
   final PendantController pendant;
   final OnDeviceTranscriptionService transcriber;
+  final UnderstandingService understanding;
 
   static String _gb(int kib) => (kib / 1048576).toStringAsFixed(1);
 
@@ -32,7 +34,7 @@ class DeviceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([pendant, transcriber]),
+      listenable: Listenable.merge([pendant, transcriber, understanding]),
       builder: (context, _) {
         final p = pendant;
         final s = p.status;
@@ -148,6 +150,32 @@ class DeviceScreen extends StatelessWidget {
               ]),
             ),
             if (t.error != null) Text(t.error!, style: TextStyles.body.copyWith(color: Palette.danger)),
+            const SectionHeader('Understanding'),
+            if (!understanding.modelReady)
+              ListRow(
+                onTap: understanding.downloading ? null : understanding.downloadModel,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('On-phone AI model', style: TextStyles.label),
+                  const SizedBox(height: 4),
+                  Text(
+                      understanding.downloading
+                          ? 'Downloading ${(understanding.downloadProgress * 100).floor()}%'
+                          : 'Pulls out tasks, promises, plans and facts. Tap to download once, '
+                              '${(llmModel.size / 1e9).toStringAsFixed(1)} GB. Use Wi-Fi.',
+                      style: TextStyles.caption),
+                  if (understanding.downloading) ...[
+                    const SizedBox(height: 8),
+                    DottedTrack(value: understanding.downloadProgress),
+                  ],
+                ]),
+              )
+            else
+              ListRow(
+                child: Text(understanding.working ? 'Reading conversations…' : 'Up to date',
+                    style: TextStyles.label),
+              ),
+            if (understanding.error != null)
+              Text(understanding.error!, style: TextStyles.body.copyWith(color: Palette.danger)),
             const SizedBox(height: 16),
             const Text('Link to the pendant is encrypted (bonded BLE). Audio on its SD card is not encrypted until it syncs.',
                 style: TextStyles.caption),

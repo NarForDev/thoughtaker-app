@@ -1,9 +1,12 @@
 package com.narfordev.thoughtaker_app
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.BatteryManager
+import android.provider.CalendarContract
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -41,6 +44,29 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 else -> result.notImplemented()
+            }
+        }
+        // Hands a prefilled draft to the user's own apps; nothing is created or sent without their tap.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "thoughtaker/intents").setMethodCallHandler { call, result ->
+            val intent = when (call.method) {
+                "insertEvent" -> Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
+                    .putExtra(CalendarContract.Events.TITLE, call.argument<String>("title"))
+                    .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, call.argument<Number>("beginMs")?.toLong())
+                    .putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, call.argument<Boolean>("allDay") ?: false)
+                "composeEmail" -> Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+                    .putExtra(Intent.EXTRA_SUBJECT, call.argument<String>("subject"))
+                    .putExtra(Intent.EXTRA_TEXT, call.argument<String>("body"))
+                "shareText" -> Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, call.argument<String>("text")),
+                    null)
+                else -> null
+            }
+            if (intent == null) return@setMethodCallHandler result.notImplemented()
+            try {
+                app.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                result.success(true)
+            } catch (e: ActivityNotFoundException) {
+                result.success(false) // no calendar or mail app installed
             }
         }
     }

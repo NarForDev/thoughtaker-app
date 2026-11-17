@@ -6,12 +6,21 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../adpcm.dart';
+import '../ai/understanding.dart' show itemKinds;
 import '../conversations.dart';
 import '../db.dart';
 import '../ui/format.dart';
 import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
+
+/// Opens the conversation holding [chunkId], playing from [seekMs] into that chunk.
+void openConversationAt(BuildContext context, AppDb db, Listenable transcriber, int chunkId, int seekMs) {
+  final v = groupConversations(db.chunks()).where((v) => v.chunks.any((c) => c.id == chunkId)).firstOrNull;
+  if (v == null) return;
+  Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => ConversationScreen(db: db, transcriber: transcriber, conversation: v, chunkId: chunkId, seekMs: seekMs)));
+}
 
 /// One conversation: its transcript and playback across all its chunks.
 class ConversationScreen extends StatefulWidget {
@@ -130,10 +139,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
     return ListenableBuilder(
       listenable: widget.transcriber,
       builder: (context, _) {
-        final lines = <Widget>[];
+        final lines = <Widget>[], found = <Widget>[];
         var pending = 0;
         for (var i = 0; i < _chunks.length; i++) {
           final c = _chunks[i];
+          for (final item in widget.db.chunkItems(c.id)) {
+            found.add(ListRow(
+              marked: true,
+              onTap: () => _seek(_offsets[i] + item.atMs),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(itemKinds[item.kind]!, style: TextStyles.caption),
+                const SizedBox(height: 2),
+                Text(item.text, style: TextStyles.label),
+              ]),
+            ));
+          }
           final segments = widget.db.segments(c.id);
           if (segments.isEmpty && !widget.db.isTranscribed(c.id)) pending++;
           for (final s in segments) {
@@ -168,7 +188,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyles.caption),
             if (_error != null) Text('Cannot play: $_error', style: TextStyles.body.copyWith(color: Palette.danger)),
-            const SizedBox(height: 16),
+            if (found.isNotEmpty) ...[const SectionHeader('Pulled out'), ...found, const SectionHeader('Transcript')]
+            else
+              const SizedBox(height: 16),
             ...lines,
             if (pending > 0)
               Text('$pending of ${_chunks.length} minute(s) not transcribed yet.', style: TextStyles.caption)

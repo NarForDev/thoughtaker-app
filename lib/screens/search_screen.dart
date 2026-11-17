@@ -1,6 +1,5 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../conversations.dart';
 import '../db.dart';
 import '../ui/format.dart';
 import '../ui/theme.dart';
@@ -20,13 +19,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   List<SearchHit>? _hits;
 
-  void _open(SearchHit h) {
-    final v = groupConversations(widget.db.chunks()).where((v) => v.chunks.any((c) => c.id == h.chunkId)).firstOrNull;
-    if (v == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => ConversationScreen(
-            db: widget.db, transcriber: widget.transcriber, conversation: v, chunkId: h.chunkId, seekMs: h.startMs)));
-  }
+  void _open(SearchHit h) => openConversationAt(context, widget.db, widget.transcriber, h.chunkId, h.startMs);
 
   @override
   Widget build(BuildContext context) {

@@ -6,7 +6,6 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
@@ -14,11 +13,12 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 import '../adpcm.dart';
 import '../db.dart';
 import '../protocol.dart';
+import 'download.dart';
 
 const _whisper = 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/bb53ee204431c90d314c1cc08d28d23e5b7927cc';
 
-// Pinned to a repo commit and checked by size and SHA-256, so a changed upstream file is rejected, not run.
-const models = [
+// Pinned to a repo commit and checked by size and SHA-256 (download.dart).
+const List<ModelFile> models = [
   (
     name: 'silero_vad.onnx',
     url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx',
@@ -158,6 +158,9 @@ class OnDeviceTranscriptionService extends ChangeNotifier {
 
   bool get onlyWhileCharging => db.setting(_onlyChargingKey) != '0';
 
+  /// Heavy on-device work (transcription, understanding) runs only when this allows it.
+  Future<bool> mayRunNow() async => !onlyWhileCharging || await _isPluggedIn();
+
   set onlyWhileCharging(bool v) {
     db.setSetting(_onlyChargingKey, v ? null : '0');
     notifyListeners();
@@ -165,11 +168,7 @@ class OnDeviceTranscriptionService extends ChangeNotifier {
   }
 
   void start() {
-    // A file only gets its final name after its hash matched, so size is enough to recognise it here.
-    modelsReady = models.every((m) {
-      final f = File('${modelDir.path}/${m.name}');
-      return f.existsSync() && f.lengthSync() == m.size;
-    });
+    modelsReady = models.every((m) => isDownloaded(modelDir, m));
     // shortcut: polls for the phone being plugged in; a power-connected receiver would react instantly.
     _poll = Timer.periodic(const Duration(minutes: 1), (_) => kick());
     kick();
@@ -193,7 +192,7 @@ class OnDeviceTranscriptionService extends ChangeNotifier {
     try {
       while (_again) {
         _again = false;
-        while (modelsReady && (!onlyWhileCharging || await _isPluggedIn())) {
+        while (modelsReady && await mayRunNow()) {
           final next = db.nextUntranscribed();
           if (next == null) break;
           working = true;
@@ -229,39 +228,15 @@ class OnDeviceTranscriptionService extends ChangeNotifier {
     notifyListeners();
     final client = HttpClient();
     try {
-      await modelDir.create(recursive: true);
       var done = 0;
       for (final m in models) {
-        final file = File('${modelDir.path}/${m.name}');
-        if (await file.exists() && await file.length() == m.size) {
-          done += m.size;
-          continue;
-        }
-        final part = File('${file.path}.part');
-        final res = await (await client.getUrl(Uri.parse(m.url))).close();
-        if (res.statusCode != HttpStatus.ok) throw HttpException('${m.name}: HTTP ${res.statusCode}');
-        final sink = part.openWrite();
-        var got = 0;
-        try {
-          await for (final bytes in res) {
-            got += bytes.length;
-            if (got > m.size) throw FormatException('${m.name}: larger than expected');
-            sink.add(bytes);
-            final p = (done + got) / modelBytes;
-            if ((p * 100).floor() != (downloadProgress * 100).floor()) {
-              downloadProgress = p;
-              notifyListeners();
-            }
+        await downloadVerified(client, modelDir, m, (got) {
+          final p = (done + got) / modelBytes;
+          if ((p * 100).floor() != (downloadProgress * 100).floor()) {
+            downloadProgress = p;
+            notifyListeners();
           }
-        } finally {
-          await sink.close();
-        }
-        final digest = await sha256.bind(part.openRead()).first;
-        if (got != m.size || digest.toString() != m.sha256) {
-          await part.delete();
-          throw FormatException('${m.name}: size or checksum mismatch');
-        }
-        await part.rename(file.path);
+        });
         done += m.size;
       }
       modelsReady = true;
