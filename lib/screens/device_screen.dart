@@ -137,11 +137,6 @@ class DeviceScreen extends StatelessWidget {
                   if (t.downloading) ...[const SizedBox(height: 8), DottedTrack(value: t.downloadProgress)],
                 ]),
               ),
-            PillToggle(
-                label: 'Transcribe only while charging',
-                value: t.onlyWhileCharging,
-                onChanged: (v) => t.onlyWhileCharging = v),
-            const SizedBox(height: 8),
             ListRow(
               child: Row(children: [
                 Expanded(

@@ -9,26 +9,26 @@ import '../adpcm.dart';
 import '../ai/understanding.dart' show itemKinds;
 import '../conversations.dart';
 import '../db.dart';
+import '../services.dart';
 import '../ui/format.dart';
 import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 
 /// Opens the conversation holding [chunkId], playing from [seekMs] into that chunk.
-void openConversationAt(BuildContext context, AppDb db, Listenable transcriber, int chunkId, int seekMs) {
-  final v = groupConversations(db.chunks()).where((v) => v.chunks.any((c) => c.id == chunkId)).firstOrNull;
+void openConversationAt(BuildContext context, Services s, int chunkId, int seekMs) {
+  final v = groupConversations(s.db.chunks()).where((v) => v.chunks.any((c) => c.id == chunkId)).firstOrNull;
   if (v == null) return;
   Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ConversationScreen(db: db, transcriber: transcriber, conversation: v, chunkId: chunkId, seekMs: seekMs)));
+      builder: (_) => ConversationScreen(s: s, conversation: v, chunkId: chunkId, seekMs: seekMs)));
 }
 
 /// One conversation: its transcript and playback across all its chunks.
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen(
-      {super.key, required this.db, required this.transcriber, required this.conversation, this.chunkId, this.seekMs = 0});
+      {super.key, required this.s, required this.conversation, this.chunkId, this.seekMs = 0});
 
-  final AppDb db;
-  final Listenable transcriber; // rebuilds the transcript as chunks finish transcribing
+  final Services s;
   final Conversation conversation;
   final int? chunkId; // open at this chunk...
   final int seekMs; // ...and this offset into it
@@ -83,6 +83,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   int get _total => widget.conversation.durationMs;
 
+  Future<void> _delete() async {
+    final ok = await confirmSheet(context,
+        title: 'Delete this conversation?',
+        body: 'Its audio, transcript and items are removed from this phone, along with their calendar events.',
+        confirm: 'Delete');
+    if (!ok || !mounted) return;
+    await _player.stop();
+    await widget.s.deleteChunks(_chunks);
+    if (mounted) Navigator.of(context).pop();
+  }
+
   int _at(Duration pos) => _offsets[_player.currentIndex ?? 0] + pos.inMilliseconds;
 
   void _seek(int ms) {
@@ -96,7 +107,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         backgroundColor: Palette.surface,
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
         builder: (sheet) {
-          final speakerId = widget.db.lineSpeaker(segmentId);
+          final speakerId = widget.s.db.lineSpeaker(segmentId);
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
@@ -116,7 +127,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                         light: true,
                         onPressed: () {
                           Navigator.pop(sheet);
-                          setState(() => widget.db.markAsMe(segmentId));
+                          setState(() => widget.s.db.markAsMe(segmentId));
                         }),
                     PillButton(
                         label: 'Rename speaker',
@@ -162,7 +173,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       ),
     );
     final n = name.text.trim();
-    if (ok == true && n.isNotEmpty && mounted) setState(() => widget.db.renameSpeaker(speakerId, n));
+    if (ok == true && n.isNotEmpty && mounted) setState(() => widget.s.db.renameSpeaker(speakerId, n));
   }
 
   Widget _panel() => ControlPanel(
@@ -211,13 +222,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final v = widget.conversation;
     final start = v.startMs;
     return ListenableBuilder(
-      listenable: widget.transcriber,
+      listenable: widget.s.changes, // transcript and items fill in as they are made
       builder: (context, _) {
         final lines = <Widget>[], found = <Widget>[];
         var pending = 0;
         for (var i = 0; i < _chunks.length; i++) {
           final c = _chunks[i];
-          for (final item in widget.db.chunkItems(c.id)) {
+          for (final item in widget.s.db.chunkItems(c.id)) {
             found.add(ListRow(
               marked: true,
               onTap: () => _seek(_offsets[i] + item.atMs),
@@ -228,8 +239,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ]),
             ));
           }
-          final segments = widget.db.segments(c.id);
-          if (segments.isEmpty && !widget.db.isTranscribed(c.id)) pending++;
+          final segments = widget.s.db.segments(c.id);
+          if (segments.isEmpty && !widget.s.db.isTranscribed(c.id)) pending++;
           for (final s in segments) {
             final ms = s['start_ms'] as int;
             final at = _offsets[i] + ms;
@@ -251,6 +262,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         }
         return ScreenFrame(
           title: start == null ? 'Conversation' : clockTime(context, start),
+          action: CircleIconButton(icon: Icons.delete_outline_rounded, tooltip: 'Delete conversation', onPressed: _delete),
           wash: headerBlue,
           panel: _panel(),
           children: [

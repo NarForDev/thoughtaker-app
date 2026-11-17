@@ -42,6 +42,12 @@ class PendantController extends ChangeNotifier {
 
   bool get hasDevice => db.setting(_deviceIdKey) != null;
 
+  /// Tells listeners the stored chunks changed outside a sync (e.g. the user deleted some).
+  void dataChanged() {
+    chunksStored++;
+    notifyListeners();
+  }
+
   int? get lastSyncMs => int.tryParse(db.setting(_lastSyncKey) ?? '');
 
   /// Pair once, then this keeps reconnecting and syncing in the background, backing off while the pendant is away.

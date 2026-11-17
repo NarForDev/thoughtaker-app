@@ -50,6 +50,7 @@ class Item {
         dueMs = r['due_ms'] as int?,
         state = r['state'] as String,
         remindMs = r['remind_ms'] as int?,
+        eventId = r['event_id'] as int?,
         chunkId = r['chunk_id'] as int,
         atMs = r['start_ms'] as int,
         chunkStartMs = r['chunk_start_ms'] as int?,
@@ -58,7 +59,7 @@ class Item {
 
   final int id, chunkId, atMs; // atMs: offset of the source line in its chunk
   final String kind, text, state, quote;
-  final int? dueMs, remindMs, chunkStartMs;
+  final int? dueMs, remindMs, chunkStartMs, eventId; // eventId: its entry in the phone calendar
   final String? speaker;
 
   /// When it was said, if the chunk's time is known.
@@ -74,6 +75,7 @@ class AppDb {
   AppDb(this.db) {
     db.execute('''
       PRAGMA foreign_keys = ON;
+      PRAGMA secure_delete = ON;
       CREATE TABLE IF NOT EXISTS chunks(
         id INTEGER PRIMARY KEY,
         store_id INTEGER NOT NULL,
@@ -120,6 +122,10 @@ class AppDb {
         embedding BLOB NOT NULL,
         speaker_id INTEGER REFERENCES speakers(id));
       CREATE TABLE IF NOT EXISTS voice_samples(id INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS deleted_chunks(
+        store_id INTEGER NOT NULL, seq INTEGER NOT NULL, crc INTEGER NOT NULL, PRIMARY KEY(store_id, seq));
+      CREATE TABLE IF NOT EXISTS daily_summaries(
+        day TEXT PRIMARY KEY, text TEXT NOT NULL, topics TEXT NOT NULL, chunk_count INTEGER NOT NULL);
       CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
         text, speaker, content='transcript_segments', content_rowid='id');
       CREATE TRIGGER IF NOT EXISTS segments_ai AFTER INSERT ON transcript_segments BEGIN
@@ -133,6 +139,9 @@ class AppDb {
         INSERT INTO transcript_fts(rowid, text, speaker) VALUES (new.id, new.text, new.speaker);
       END;
     ''');
+    // Columns added after the table first shipped.
+    final itemColumns = {for (final r in db.select('PRAGMA table_info(items)')) r['name']};
+    if (!itemColumns.contains('event_id')) db.execute('ALTER TABLE items ADD COLUMN event_id INTEGER');
   }
 
   final Database db;
@@ -151,9 +160,31 @@ class AppDb {
       'SELECT epoch_offset_ms FROM boot_offsets WHERE store_id = ? AND boot_id = ?',
       [storeId, bootId]).firstOrNull?['epoch_offset_ms'];
 
-  /// The stored crc if this chunk is already committed (its ACK may have been lost).
-  int? chunkCrc(int storeId, int seq) =>
-      db.select('SELECT crc FROM chunks WHERE store_id = ? AND seq = ?', [storeId, seq]).firstOrNull?['crc'];
+  /// The stored crc if this chunk is already committed (its ACK may have been lost) or was deleted by the user,
+  /// so a re-sent chunk is acked again but never stored again.
+  int? chunkCrc(int storeId, int seq) => db.select(
+      'SELECT crc FROM chunks WHERE store_id = ?1 AND seq = ?2 UNION ALL SELECT crc FROM deleted_chunks WHERE store_id = ?1 AND seq = ?2',
+      [storeId, seq]).firstOrNull?['crc'];
+
+  /// Deletes chunks with their transcripts, voices and items, leaving a tombstone each. Files are the caller's.
+  void deleteChunks(List<int> ids) {
+    if (ids.isEmpty) return;
+    final list = List.filled(ids.length, '?').join(',');
+    db.execute('BEGIN');
+    try {
+      db.execute('INSERT OR REPLACE INTO deleted_chunks SELECT store_id, seq, crc FROM chunks WHERE id IN ($list)', ids);
+      db.execute('DELETE FROM chunks WHERE id IN ($list)', ids);
+      db.execute('COMMIT');
+    } catch (_) {
+      db.execute('ROLLBACK');
+      rethrow;
+    }
+    db.execute("INSERT INTO transcript_fts(transcript_fts) VALUES ('optimize')"); // drop deleted text from the index
+  }
+
+  /// Everything learned about voices and days, for "Delete everything".
+  void clearDerived() => db.execute('DELETE FROM voice_samples; DELETE FROM voiceprints; DELETE FROM speakers; '
+      'DELETE FROM daily_summaries;');
 
   int insertChunk({
     required int storeId,
@@ -195,6 +226,7 @@ class AppDb {
 
   /// Replaces the chunk's transcript and marks it done, atomically, so a crash never leaves half a transcript.
   void saveTranscript(int chunkId, List<Segment> segments) {
+    if (chunk(chunkId) == null) return; // deleted while it was being transcribed
     db.execute('BEGIN');
     try {
       db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]); // cascades to its items
@@ -230,6 +262,7 @@ class AppDb {
 
   /// Replaces the chunk's items and marks it done, atomically.
   void saveItems(int chunkId, List<NewItem> items) {
+    if (chunk(chunkId) == null) return; // deleted while it was being read
     db.execute('BEGIN');
     try {
       db.execute('DELETE FROM items WHERE segment_id IN (SELECT id FROM transcript_segments WHERE chunk_id = ?)',
@@ -262,6 +295,31 @@ class AppDb {
   void setItemState(int id, String state) => db.execute('UPDATE items SET state = ? WHERE id = ?', [state, id]);
 
   void setReminder(int id, int? atMs) => db.execute('UPDATE items SET remind_ms = ? WHERE id = ?', [atMs, id]);
+
+  void setEventId(int id, int? eventId) => db.execute('UPDATE items SET event_id = ? WHERE id = ?', [eventId, id]);
+
+  /// Items of these chunks that still have a calendar event or a reminder to clean up.
+  List<Item> itemsOfChunks(List<int> chunkIds) => db
+      .select('$_itemSelect WHERE s.chunk_id IN (${List.filled(chunkIds.length, '?').join(',')})', chunkIds)
+      .map(Item.new)
+      .toList();
+
+  /// Chunks that have at least one transcript line.
+  Set<int> spokenChunkIds() => {for (final r in db.select('SELECT DISTINCT chunk_id FROM transcript_segments')) r['chunk_id'] as int};
+
+  /// Day summaries by local day key (YYYY-MM-DD).
+  Map<String, ({String text, List<String> topics, int chunkCount})> summaries() => {
+        for (final r in db.select('SELECT * FROM daily_summaries'))
+          r['day'] as String: (
+            text: r['text'] as String,
+            topics: (r['topics'] as String).split(',').where((t) => t.isNotEmpty).toList(),
+            chunkCount: r['chunk_count'] as int,
+          ),
+      };
+
+  void saveSummary(String day, String text, List<String> topics, int chunkCount) => db.execute(
+      'INSERT OR REPLACE INTO daily_summaries(day, text, topics, chunk_count) VALUES (?, ?, ?, ?)',
+      [day, text, topics.join(','), chunkCount]);
 
   List<Float32List> _voiceSamples() =>
       [for (final r in db.select('SELECT embedding FROM voice_samples')) voiceFromBytes(r['embedding'])];

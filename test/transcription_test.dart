@@ -56,9 +56,10 @@ void main() {
     expect(db.segments(id), isEmpty);
   });
 
-  test('saveTranscript rolls back on failure', () {
-    expect(() => db.saveTranscript(999, [(startMs: 0, endMs: 1, text: 'orphan', voice: null)]), throwsA(isA<SqliteException>()));
+  test('saveTranscript for a chunk deleted mid-transcription is a no-op', () {
+    db.saveTranscript(999, [(startMs: 0, endMs: 1, text: 'orphan', voice: null)]);
     expect(db.db.select('SELECT * FROM transcript_segments'), isEmpty);
+    expect(db.isTranscribed(999), isFalse);
   });
 
   group('queue', () {

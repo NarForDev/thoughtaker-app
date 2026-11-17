@@ -4,8 +4,10 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Bundle
 import android.provider.CalendarContract
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -25,6 +27,21 @@ class MainActivity : FlutterActivity() {
 
     override fun shouldDestroyEngineWithHost() = false
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        current = this // the activity a permission prompt can be shown from
+    }
+
+    override fun onDestroy() {
+        if (current === this) current = null
+        super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        CalendarChannel.onPermissionResult(requestCode, grantResults)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         // A recreated activity gets the cached engine back; plugins and channels are already set up.
         if (configured) return
@@ -38,6 +55,7 @@ class MainActivity : FlutterActivity() {
                     val battery = app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
                     result.success((battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0)
                 }
+                "isMetered" -> result.success(app.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered)
                 "keepAlive" -> {
                     val service = Intent(app, KeepAliveService::class.java)
                     if (call.arguments == true) app.startForegroundService(service) else app.stopService(service)
@@ -46,6 +64,7 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        CalendarChannel.register(flutterEngine.dartExecutor.binaryMessenger, app)
         // Hands a prefilled draft to the user's own apps; nothing is created or sent without their tap.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "thoughtaker/intents").setMethodCallHandler { call, result ->
             val intent = when (call.method) {
@@ -74,5 +93,6 @@ class MainActivity : FlutterActivity() {
     companion object {
         const val ENGINE = "main"
         var configured = false
+        var current: MainActivity? = null
     }
 }

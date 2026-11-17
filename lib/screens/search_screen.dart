@@ -1,16 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../db.dart';
+import '../services.dart';
 import '../ui/format.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'conversation_screen.dart';
+import 'timeline_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, required this.db, required this.transcriber});
+  const SearchScreen({super.key, required this.s});
 
-  final AppDb db;
-  final Listenable transcriber;
+  final Services s;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -21,14 +22,25 @@ class _SearchScreenState extends State<SearchScreen> {
   String _query = '';
   String? _person; // null = everyone
 
-  void _search() => setState(() => _hits = widget.db.search(_query, speaker: _person));
+  List<String> _days = []; // days whose summary or topics match
 
-  void _open(SearchHit h) => openConversationAt(context, widget.db, widget.transcriber, h.chunkId, h.startMs);
+  void _search() => setState(() {
+        _hits = widget.s.db.search(_query, speaker: _person);
+        final words = _query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+        _days = _person != null || words.isEmpty
+            ? []
+            : [
+                for (final MapEntry(key: day, value: v) in widget.s.db.summaries().entries)
+                  if (words.every((w) => v.topics.any((t) => t.contains(w)) || v.text.toLowerCase().contains(w))) day,
+              ]..sort((a, b) => b.compareTo(a));
+      });
+
+  void _open(SearchHit h) => openConversationAt(context, widget.s, h.chunkId, h.startMs);
 
   @override
   Widget build(BuildContext context) {
     final hits = _hits;
-    final people = widget.db.people();
+    final people = widget.s.db.people();
     return ScreenFrame(
       title: 'Search',
       wash: headerBlue,
@@ -66,6 +78,17 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           const SizedBox(height: 16),
         ],
+        for (final day in _days)
+          ListRow(
+            marked: true,
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute<void>(builder: (_) => TimelineScreen(s: widget.s, day: day))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(MaterialLocalizations.of(context).formatFullDate(DateTime.parse(day)), style: TextStyles.label),
+              const SizedBox(height: 4),
+              Text(widget.s.db.summaries()[day]!.text, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyles.body),
+            ]),
+          ),
         if (hits == null)
           const Text('Search everything that was transcribed, or pick a person to see what they said.',
               style: TextStyles.body)

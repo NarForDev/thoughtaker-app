@@ -6,10 +6,12 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'ai/on_device_transcription.dart';
 import 'ai/understanding.dart';
+import 'acting/calendar.dart';
 import 'acting/reminders.dart';
 import 'db.dart';
 import 'pendant.dart';
 import 'screens/conversation_screen.dart';
+import 'services.dart';
 import 'screens/home_screen.dart';
 import 'ui/theme.dart';
 
@@ -24,37 +26,35 @@ Future<void> main() async {
   final understanding = UnderstandingService(db, models, mayRunNow: transcriber.mayRunNow)..start();
   transcriber.addListener(understanding.kick); // a finished transcript is new work for understanding
   final navigator = GlobalKey<NavigatorState>();
+  late final Services services;
   // A reminder tap opens the moment the item was said.
   final reminders = Reminders(db, onOpen: (id) {
     final i = db.item(id), context = navigator.currentContext;
-    if (i != null && context != null) openConversationAt(context, db, transcriber, i.chunkId, i.atMs);
+    if (i != null && context != null) openConversationAt(context, services, i.chunkId, i.atMs);
+  });
+  final calendar = CalendarSync(db);
+  understanding.addListener(() {
+    if (!understanding.downloading) calendar.sync(); // new or changed items go to the calendar
   });
   final pendant = PendantController(db, transcriber.kick, chunksDir: chunks, partialDir: partial)..startAutoSync();
-  runApp(ThoughtakerApp(
-      db: db,
-      pendant: pendant,
-      transcriber: transcriber,
-      understanding: understanding,
-      reminders: reminders,
-      navigator: navigator));
+  services = Services(
+    db: db,
+    pendant: pendant,
+    transcriber: transcriber,
+    understanding: understanding,
+    reminders: reminders,
+    calendar: calendar,
+    partialDir: partial,
+  );
+  runApp(ThoughtakerApp(s: services, navigator: navigator));
   await reminders.init(); // after runApp, so a launch from a notification can navigate
+  await calendar.sync();
 }
 
 class ThoughtakerApp extends StatelessWidget {
-  const ThoughtakerApp(
-      {super.key,
-      required this.db,
-      required this.pendant,
-      required this.transcriber,
-      required this.understanding,
-      required this.reminders,
-      required this.navigator});
+  const ThoughtakerApp({super.key, required this.s, required this.navigator});
 
-  final AppDb db;
-  final PendantController pendant;
-  final OnDeviceTranscriptionService transcriber;
-  final UnderstandingService understanding;
-  final Reminders reminders;
+  final Services s;
   final GlobalKey<NavigatorState> navigator;
 
   @override
@@ -63,8 +63,7 @@ class ThoughtakerApp extends StatelessWidget {
       title: 'Thoughtaker',
       theme: appTheme,
       navigatorKey: navigator,
-      home: HomeScreen(
-          db: db, pendant: pendant, transcriber: transcriber, understanding: understanding, reminders: reminders),
+      home: HomeScreen(s: s),
     );
   }
 }

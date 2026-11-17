@@ -1,6 +1,19 @@
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
+
+import '../db.dart';
+
+const _power = MethodChannel('thoughtaker/power');
+const wifiOnlyKey = 'wifi_only';
+
+/// Model downloads are large, so by default they wait for Wi-Fi.
+Future<void> checkNetwork(AppDb db) async {
+  if (db.setting(wifiOnlyKey) != '0' && (await _power.invokeMethod<bool>('isMetered') ?? false)) {
+    throw const HttpException('Connect to Wi-Fi to download, or allow mobile data in Settings');
+  }
+}
 
 /// A model file pinned by URL, size and SHA-256.
 typedef ModelFile = ({String name, String url, int size, String sha256});

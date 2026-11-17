@@ -239,6 +239,27 @@ class SectionHeader extends StatelessWidget {
       );
 }
 
+/// Quiet text action, e.g. "All items" beside a section header.
+class TextLink extends StatelessWidget {
+  const TextLink(this.label, {super.key, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4), // 44 px tall hit area
+            child: Text(label, style: TextStyles.label.copyWith(color: Palette.textMid)),
+          ),
+        ),
+      );
+}
+
 /// A list row in tile style. [marked] draws the signal bar used for bookmarks.
 class ListRow extends StatelessWidget {
   const ListRow({super.key, required this.child, this.onTap, this.onLongPress, this.marked = false, this.dim = false});

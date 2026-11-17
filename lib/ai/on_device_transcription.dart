@@ -254,6 +254,7 @@ class OnDeviceTranscriptionService extends ChangeNotifier {
     notifyListeners();
     final client = HttpClient();
     try {
+      await checkNetwork(db);
       var done = 0;
       for (final m in models) {
         await downloadVerified(client, modelDir, m, (got) {

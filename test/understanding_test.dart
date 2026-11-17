@@ -73,7 +73,7 @@ void main() {
     db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Call mum tonight', voice: null)]);
     var allowed = false;
     final prompts = <String>[];
-    final s = UnderstandingService(db, Directory.systemTemp, mayRunNow: () async => allowed, generate: (system, user) async {
+    final s = UnderstandingService(db, Directory.systemTemp, mayRunNow: () async => allowed, generate: (system, user, schema) async {
       prompts.add(user);
       return '{"items": [{"kind": "task", "line": 1, "text": "Call mum", "due": ""}]}';
     });

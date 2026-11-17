@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:llamadart/llamadart.dart';
 import 'package:sqlite3/sqlite3.dart' show Row;
 
+import '../conversations.dart';
 import '../db.dart';
 import 'download.dart';
 
@@ -28,7 +29,7 @@ const itemKinds = {
   'fact': 'Worth remembering',
 };
 
-typedef Generate = Future<String> Function(String system, String user);
+typedef Generate = Future<String> Function(String system, String user, Map<String, Object> schema);
 
 const _system = '''You read a transcript recorded by a pendant the user wears, and list what is worth acting on.
 Kinds:
@@ -70,6 +71,72 @@ const _schema = {
     },
   },
 };
+
+const _summarySystem = '''You summarise a day of conversations recorded by a pendant the user wears.
+The user's lines are labelled "You". Write "summary": 2 or 3 plain sentences about what happened and what was agreed,
+addressed to the user as "you". Write "topics": 3 to 8 short lowercase topic words or phrases.''';
+
+const _summarySchema = {
+  'type': 'json_schema',
+  'json_schema': {
+    'schema': {
+      'type': 'object',
+      'properties': {
+        'summary': {'type': 'string'},
+        'topics': {
+          'type': 'array',
+          'items': {'type': 'string'},
+        },
+      },
+      'required': ['summary', 'topics'],
+    },
+  },
+};
+
+/// Local day key, YYYY-MM-DD.
+String dayKey(int ms) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ms);
+  return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
+
+/// Days whose spoken chunks changed since their summary, with those chunks. Today waits for 5 new chunks
+/// between summaries, so the model is not rerun on every minute of a busy day.
+List<(String, List<Chunk>)> staleDays(
+    List<Chunk> byStoreSeq, Set<int> spoken, Map<String, int> summarizedCounts, DateTime now) {
+  final days = <String, List<Chunk>>{};
+  for (final (c, at) in placeChunks(byStoreSeq).reversed) {
+    if (at != null && spoken.contains(c.id)) days.putIfAbsent(dayKey(at), () => []).add(c);
+  }
+  final today = dayKey(now.millisecondsSinceEpoch);
+  return [
+    for (final MapEntry(key: day, value: chunks) in days.entries)
+      if (summarizedCounts[day] case final done
+          when done == null || (day == today ? chunks.length - done >= 5 : chunks.length != done))
+        (day, chunks),
+  ];
+}
+
+/// Model output is untrusted: a non-empty summary of bounded length and a few short topic words.
+({String text, List<String> topics})? parseSummary(String json) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(json);
+  } on FormatException {
+    return null;
+  }
+  if (decoded is! Map) return null;
+  final text = decoded['summary'], topics = decoded['topics'];
+  if (text is! String || text.trim().isEmpty) return null;
+  final t = text.trim();
+  return (
+    text: t.length > 600 ? t.substring(0, 600) : t,
+    topics: [
+      if (topics is List)
+        for (final w in topics.whereType<String>().map((w) => w.trim().toLowerCase().replaceAll(',', ' ')))
+          if (w.isNotEmpty && w.length <= 30) w,
+    ].take(8).toList(),
+  );
+}
 
 /// The user message: when it was said, then the numbered transcript lines.
 String buildPrompt(List<Row> segments, DateTime? saidAt, DateTime now) {
@@ -147,15 +214,29 @@ class UnderstandingService extends ChangeNotifier {
       while (_again) {
         _again = false;
         while ((modelReady || _generateOverride != null) && await mayRunNow()) {
+          final generate = _generateOverride ?? _generate;
           final next = db.nextUnextracted();
-          if (next == null) break;
-          working = true;
-          notifyListeners();
-          final segments = db.segments(next.id);
-          final start = next.startMs;
-          final reply = await (_generateOverride ?? _generate)(_system,
-              buildPrompt(segments, start == null ? null : DateTime.fromMillisecondsSinceEpoch(start), DateTime.now()));
-          db.saveItems(next.id, parseItems(reply, [for (final s in segments) s['id'] as int]));
+          if (next != null) {
+            working = true;
+            notifyListeners();
+            final segments = db.segments(next.id);
+            final start = next.startMs;
+            final reply = await generate(_system,
+                buildPrompt(segments, start == null ? null : DateTime.fromMillisecondsSinceEpoch(start), DateTime.now()),
+                _schema);
+            db.saveItems(next.id, parseItems(reply, [for (final s in segments) s['id'] as int]));
+          } else {
+            // Items first; then summaries for days that changed.
+            final stale = staleDays(db.chunks(), db.spokenChunkIds(),
+                {for (final e in db.summaries().entries) e.key: e.value.chunkCount}, DateTime.now());
+            if (stale.isEmpty) break;
+            working = true;
+            notifyListeners();
+            final (day, chunks) = stale.first;
+            final summary = parseSummary(await generate(_summarySystem, _dayTranscript(chunks), _summarySchema));
+            // An unusable reply still records the count, so a bad day is not retried in a loop.
+            db.saveSummary(day, summary?.text ?? '', summary?.topics ?? const [], chunks.length);
+          }
           error = null;
           notifyListeners();
         }
@@ -172,7 +253,20 @@ class UnderstandingService extends ChangeNotifier {
     }
   }
 
-  Future<String> _generate(String system, String user) async {
+  /// The day's lines in order, capped so the prompt fits the context window.
+  String _dayTranscript(List<Chunk> chunks) {
+    final b = StringBuffer();
+    for (final c in chunks) {
+      for (final s in db.segments(c.id)) {
+        b.writeln('${s['speaker'] ?? 'Speaker'}: ${s['text']}');
+      }
+    }
+    // shortcut: keeps the first ~2500 tokens of a long day; a map-reduce over conversations would cover all of it.
+    final t = b.toString();
+    return t.length > 10000 ? t.substring(0, 10000) : t;
+  }
+
+  Future<String> _generate(String system, String user, Map<String, Object> schema) async {
     final engine = _engine ??= await LlamaEngine.load(
         LlamaModel(ModelSource.path('${modelDir.path}/${llmModel.name}')),
         params: const ModelParams(contextSize: 4096));
@@ -180,7 +274,7 @@ class UnderstandingService extends ChangeNotifier {
         .create([
           LlamaChatMessage.fromText(role: LlamaChatRole.system, text: system),
           LlamaChatMessage.fromText(role: LlamaChatRole.user, text: user),
-        ], params: const GenerationParams(maxTokens: 768, temp: 0.2), enableThinking: false, responseFormat: _schema)
+        ], params: const GenerationParams(maxTokens: 768, temp: 0.2), enableThinking: false, responseFormat: schema)
         .text();
   }
 
@@ -191,6 +285,7 @@ class UnderstandingService extends ChangeNotifier {
     notifyListeners();
     final client = HttpClient();
     try {
+      await checkNetwork(db);
       await downloadVerified(client, modelDir, llmModel, (got) {
         final p = got / llmModel.size;
         if ((p * 100).floor() != (downloadProgress * 100).floor()) {
