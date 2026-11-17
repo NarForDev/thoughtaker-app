@@ -1,15 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../conversations.dart';
 import '../db.dart';
+import '../ui/format.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
-import 'chunk_screen.dart';
-import 'timeline_screen.dart';
+import 'conversation_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, required this.db});
+  const SearchScreen({super.key, required this.db, required this.transcriber});
 
   final AppDb db;
+  final Listenable transcriber;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -19,10 +21,11 @@ class _SearchScreenState extends State<SearchScreen> {
   List<SearchHit>? _hits;
 
   void _open(SearchHit h) {
-    final chunk = widget.db.chunk(h.chunkId);
-    if (chunk == null) return;
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => ChunkScreen(db: widget.db, chunk: chunk, seekMs: h.startMs)));
+    final v = groupConversations(widget.db.chunks()).where((v) => v.chunks.any((c) => c.id == h.chunkId)).firstOrNull;
+    if (v == null) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(
+            db: widget.db, transcriber: widget.transcriber, conversation: v, chunkId: h.chunkId, seekMs: h.startMs)));
   }
 
   @override

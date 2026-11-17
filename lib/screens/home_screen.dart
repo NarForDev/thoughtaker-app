@@ -2,6 +2,7 @@ import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:material_ui/material_ui.dart';
 
 import '../ai/on_device_transcription.dart';
+import '../conversations.dart';
 import '../db.dart';
 import '../pendant.dart';
 import '../ui/painters.dart';
@@ -42,7 +43,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
 
-  void _openTimeline() => _push(TimelineScreen(db: widget.db, pendant: widget.pendant));
+  void _openTimeline() =>
+      _push(TimelineScreen(db: widget.db, pendant: widget.pendant, transcriber: widget.transcriber));
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       PillToggle(label: 'Mute', value: s.muted, onChanged: p.connected && !p.busy ? p.setMute : null),
                     ],
                     const SizedBox(height: 24),
-                    _SearchPill(onTap: () => _push(SearchScreen(db: widget.db))),
+                    _SearchPill(onTap: () => _push(SearchScreen(db: widget.db, transcriber: widget.transcriber))),
                   ],
                 );
               },
