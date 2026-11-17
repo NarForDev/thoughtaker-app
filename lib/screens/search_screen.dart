@@ -1,6 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../db.dart';
+import '../ui/theme.dart';
+import '../ui/widgets.dart';
 import 'chunk_screen.dart';
 import 'timeline_screen.dart';
 
@@ -16,44 +18,45 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   List<SearchHit>? _hits;
 
+  void _open(SearchHit h) {
+    final chunk = widget.db.chunk(h.chunkId);
+    if (chunk == null) return;
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => ChunkScreen(db: widget.db, chunk: chunk, seekMs: h.startMs)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final hits = _hits;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
-      body: Column(children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: TextField(
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Words, people, topics',
-              border: OutlineInputBorder(),
+    return ScreenFrame(
+      title: 'Search',
+      wash: headerBlue,
+      children: [
+        const SizedBox(height: 16),
+        const Text('Find anything', style: TextStyles.display),
+        const SizedBox(height: 16),
+        PillInput(
+          hint: 'Words, people, topics',
+          icon: Icons.search_rounded,
+          autofocus: true,
+          onSubmitted: (q) => setState(() => _hits = widget.db.search(q)),
+        ),
+        const SizedBox(height: 16),
+        if (hits == null)
+          const Text('Search everything that was transcribed.', style: TextStyles.body)
+        else if (hits.isEmpty)
+          const Text('No matches. Transcripts appear here once transcription runs.', style: TextStyles.body)
+        else
+          for (final h in hits)
+            ListRow(
+              onTap: () => _open(h),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(h.snippet, style: TextStyles.body.copyWith(color: Palette.textHi)),
+                const SizedBox(height: 4),
+                Text('${h.speaker ?? 'Unknown'} · ${formatDuration(h.startMs)}', style: TextStyles.caption),
+              ]),
             ),
-            textInputAction: TextInputAction.search,
-            onSubmitted: (q) => setState(() => _hits = widget.db.search(q)),
-          ),
-        ),
-        Expanded(
-          child: hits == null
-              ? const Center(child: Text('Search everything that was transcribed.'))
-              : hits.isEmpty
-                  ? const Center(child: Text('No matches. Transcripts appear here once transcription runs.'))
-                  : ListView(children: [
-                      for (final h in hits)
-                        ListTile(
-                          title: Text(h.snippet),
-                          subtitle: Text('${h.speaker ?? 'Unknown'} · ${formatDuration(h.startMs)}'),
-                          onTap: () {
-                            final chunk = widget.db.chunk(h.chunkId);
-                            if (chunk == null) return;
-                            Navigator.of(context).push(MaterialPageRoute<void>(
-                                builder: (_) => ChunkScreen(db: widget.db, chunk: chunk, seekMs: h.startMs)));
-                          },
-                        ),
-                    ]),
-        ),
-      ]),
+      ],
     );
   }
 }

@@ -19,6 +19,7 @@ abstract final class TextStyles {
   static const display =
       TextStyle(fontSize: 34, height: 1.12, fontWeight: FontWeight.w500, letterSpacing: -0.8, color: Palette.textHi);
   static const title = TextStyle(fontSize: 20, fontWeight: FontWeight.w500, letterSpacing: -0.3, color: Palette.textHi);
+  static const heading = TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Palette.textHi);
   static const body = TextStyle(fontSize: 15, height: 1.4, color: Palette.textMid);
   static const label = TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Palette.textHi);
   static const caption = TextStyle(fontSize: 11, letterSpacing: 0.2, color: Palette.textLo);
@@ -51,6 +52,18 @@ const Glow glowEmber = (
   shadows: [BoxShadow(color: Color(0x59E0532C), blurRadius: 28, spreadRadius: -8, offset: Offset(0, 8))],
 );
 
+const Glow glowBlue = (
+  fill: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Color(0xFF3D4BC4), Color(0xFF232C8C), Color(0xFF121651), Color(0xFF0A0C2A)],
+      stops: [0, 0.35, 0.75, 1]),
+  sheen: null,
+  rim: [Color(0x739AA6FF), Color(0x009AA6FF)],
+  rimWidth: 1.5,
+  shadows: [BoxShadow(color: Color(0x662F3BBF), blurRadius: 40, spreadRadius: -10, offset: Offset(0, 8))],
+);
+
 /// Plain tile: surface gradient, hairline rim, no glow (glows are never put on ordinary tiles).
 const Glow tilePlain = (
   fill: LinearGradient(
@@ -66,6 +79,13 @@ const headerViolet = LinearGradient(
   begin: Alignment.topCenter,
   end: Alignment.bottomCenter,
   colors: [Color(0xFF8E63D9), Color(0xFF5B3A9E), Color(0xFF24183F), Palette.bg],
+  stops: [0, 0.28, 0.55, 0.85],
+);
+
+const headerBlue = LinearGradient(
+  begin: Alignment.topCenter,
+  end: Alignment.bottomCenter,
+  colors: [Color(0xFF3E63E0), Color(0xFF24409E), Color(0xFF101B45), Palette.bg],
   stops: [0, 0.28, 0.55, 0.85],
 );
 

@@ -7,6 +7,9 @@ import 'package:path_provider/path_provider.dart';
 
 import '../adpcm.dart';
 import '../db.dart';
+import '../ui/painters.dart';
+import '../ui/theme.dart';
+import '../ui/widgets.dart';
 import 'timeline_screen.dart';
 
 class ChunkScreen extends StatefulWidget {
@@ -52,69 +55,81 @@ class _ChunkScreenState extends State<ChunkScreen> {
 
   void _seek(int ms) => _player.seek(Duration(milliseconds: ms));
 
+  Widget _panel(Chunk c) => ControlPanel(
+        child: StreamBuilder<Duration>(
+          stream: _player.positionStream,
+          builder: (context, pos) {
+            final at = (pos.data?.inMilliseconds ?? 0).clamp(0, c.durationMs);
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Text(formatDuration(at), style: TextStyles.caption.copyWith(color: Palette.textMid)),
+                const Spacer(),
+                Text(formatDuration(c.durationMs), style: TextStyles.caption.copyWith(color: Palette.textMid)),
+              ]),
+              DottedTrack(
+                value: c.durationMs == 0 ? 0 : at / c.durationMs,
+                marks: [for (final b in c.bookmarksMs) b / c.durationMs],
+                onChanged: (f) => _seek((f * c.durationMs).round()),
+              ),
+              StreamBuilder<PlayerState>(
+                stream: _player.playerStateStream,
+                builder: (context, snap) {
+                  final playing = snap.data?.playing ?? false;
+                  return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    CircleIconButton(
+                        icon: Icons.replay_10_rounded,
+                        tooltip: 'Back 10 seconds',
+                        onPressed: () => _seek((at - 10000).clamp(0, c.durationMs))),
+                    PillButton(
+                      label: playing ? 'Pause' : 'Play',
+                      icon: playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      onPressed: playing ? _player.pause : _player.play,
+                    ),
+                    CircleIconButton(
+                        icon: Icons.forward_10_rounded,
+                        tooltip: 'Forward 10 seconds',
+                        onPressed: () => _seek((at + 10000).clamp(0, c.durationMs))),
+                  ]);
+                },
+              ),
+            ]);
+          },
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final c = widget.chunk;
     final segments = widget.db.segments(c.id);
     final start = c.startMs;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(start == null
-            ? 'Chunk #${c.seq}'
-            : MaterialLocalizations.of(context)
-                .formatTimeOfDay(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(start)))),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (_error != null) Text('Cannot play: $_error'),
-          StreamBuilder<PlayerState>(
-            stream: _player.playerStateStream,
-            builder: (context, snap) {
-              final playing = snap.data?.playing ?? false;
-              return Row(children: [
-                IconButton.filled(
-                  tooltip: playing ? 'Pause' : 'Play',
-                  icon: Icon(playing ? Icons.pause : Icons.play_arrow),
-                  onPressed: playing ? _player.pause : _player.play,
-                ),
-                Expanded(
-                  child: StreamBuilder<Duration>(
-                    stream: _player.positionStream,
-                    builder: (context, pos) {
-                      final max = c.durationMs.toDouble();
-                      final at = (pos.data?.inMilliseconds ?? 0).toDouble().clamp(0.0, max);
-                      return Slider(value: at, max: max, onChanged: (v) => _seek(v.toInt()));
-                    },
-                  ),
-                ),
-              ]);
-            },
-          ),
-          Text('${formatDuration(c.durationMs)} · ${c.hasSpeech ? 'speech' : 'quiet'}'),
-          if (c.bookmarksMs.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(spacing: 8, children: [
-              for (final b in c.bookmarksMs)
-                ActionChip(
-                  avatar: const Icon(Icons.bookmark),
-                  label: Text(formatDuration(b)),
-                  onPressed: () => _seek(b),
-                ),
-            ]),
-          ],
+    return ScreenFrame(
+      title: start == null ? 'Chunk #${c.seq}' : clockTime(context, start),
+      wash: headerBlue,
+      panel: _panel(c),
+      children: [
+        Text('${formatDuration(c.durationMs)} · ${c.hasSpeech ? 'speech' : 'quiet'}', style: TextStyles.caption),
+        if (_error != null) Text('Cannot play: $_error', style: TextStyles.body.copyWith(color: Palette.danger)),
+        if (c.bookmarksMs.isNotEmpty) ...[
           const SizedBox(height: 12),
-          if (segments.isEmpty)
-            Text(widget.db.isTranscribed(c.id) ? 'No speech found.' : 'No transcript yet.')
-          else
-            for (final s in segments)
-              ListTile(
-                title: Text(s['text'] as String),
-                subtitle: Text('${s['speaker'] ?? 'Unknown'} · ${formatDuration(s['start_ms'] as int)}'),
-                onTap: () => _seek(s['start_ms'] as int),
-              ),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final b in c.bookmarksMs)
+              PillButton(label: formatDuration(b), icon: Icons.star_rounded, onPressed: () => _seek(b)),
+          ]),
         ],
-      ),
+        const SizedBox(height: 16),
+        if (segments.isEmpty)
+          Text(widget.db.isTranscribed(c.id) ? 'No speech found.' : 'No transcript yet.', style: TextStyles.body)
+        else
+          for (final s in segments)
+            ListRow(
+              onTap: () => _seek(s['start_ms'] as int),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${s['speaker'] ?? 'Unknown'} · ${formatDuration(s['start_ms'] as int)}', style: TextStyles.caption),
+                const SizedBox(height: 4),
+                Text(s['text'] as String, style: TextStyles.body.copyWith(color: Palette.textHi)),
+              ]),
+            ),
+      ],
     );
   }
 }
