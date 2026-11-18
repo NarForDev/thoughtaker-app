@@ -144,6 +144,12 @@ class AppDb {
     // Columns added after the table first shipped.
     final itemColumns = {for (final r in db.select('PRAGMA table_info(items)')) r['name']};
     if (!itemColumns.contains('event_id')) db.execute('ALTER TABLE items ADD COLUMN event_id INTEGER');
+    // mine = 0: a line the user said was not them. segment_id: the answered line, so it is not asked about again.
+    final sampleColumns = {for (final r in db.select('PRAGMA table_info(voice_samples)')) r['name']};
+    if (!sampleColumns.contains('mine')) {
+      db.execute('ALTER TABLE voice_samples ADD COLUMN mine INTEGER NOT NULL DEFAULT 1');
+      db.execute('ALTER TABLE voice_samples ADD COLUMN segment_id INTEGER');
+    }
     // Calendar entries whose item went away (re-transcribed or re-read), for the calendar sync to delete.
     db.execute('''
       CREATE TABLE IF NOT EXISTS stale_events(event_id INTEGER PRIMARY KEY);
@@ -244,13 +250,13 @@ class AppDb {
     try {
       db.execute('DELETE FROM transcript_segments WHERE chunk_id = ?', [chunkId]); // cascades to its items
       db.execute('DELETE FROM extracted WHERE chunk_id = ?', [chunkId]);
-      final mine = _voiceSamples();
+      final mine = _voiceSamples(), notMine = _voiceSamples(mine: false);
       final insert = db.prepare(
           'INSERT INTO transcript_segments(chunk_id, start_ms, end_ms, speaker, text) VALUES (?, ?, ?, ?, ?)');
       for (final s in segments) {
         final v = s.voice;
         final speakerId = v == null ? null : _assignSpeaker(v);
-        insert.execute([chunkId, s.startMs, s.endMs, v == null ? null : _label(v, mine, speakerId!), s.text]);
+        insert.execute([chunkId, s.startMs, s.endMs, v == null ? null : _label(v, mine, notMine, speakerId!), s.text]);
         if (v != null) {
           db.execute('INSERT INTO voiceprints(segment_id, embedding, speaker_id) VALUES (?, ?, ?)',
               [db.lastInsertRowId, voiceBytes(v), speakerId]);
@@ -338,10 +344,13 @@ class AppDb {
       'INSERT OR REPLACE INTO daily_summaries(day, text, topics, chunk_count) VALUES (?, ?, ?, ?)',
       [day, text, topics.join(','), chunkCount]);
 
-  List<Float32List> _voiceSamples() =>
-      [for (final r in db.select('SELECT embedding FROM voice_samples')) voiceFromBytes(r['embedding'])];
+  List<Float32List> _voiceSamples({bool mine = true}) => [
+        for (final r in db.select('SELECT embedding FROM voice_samples WHERE mine = ?', [mine ? 1 : 0]))
+          voiceFromBytes(r['embedding']),
+      ];
 
-  String _label(Float32List voice, List<Float32List> mine, int speakerId) => isMyVoice(voice, mine)
+  String _label(Float32List voice, List<Float32List> mine, List<Float32List> notMine, int speakerId) =>
+      isMyVoice(voice, mine, notMine)
       ? 'You'
       : db.select('SELECT name FROM speakers WHERE id = ?', [speakerId]).first['name'] as String;
 
@@ -363,12 +372,12 @@ class AppDb {
 
   /// Rewrites every voiced line's speaker from the current profile and speaker names.
   void _relabel() {
-    final mine = _voiceSamples();
+    final mine = _voiceSamples(), notMine = _voiceSamples(mine: false);
     db.execute('BEGIN');
     try {
       for (final r in db.select('SELECT segment_id, embedding, speaker_id FROM voiceprints')) {
         db.execute('UPDATE transcript_segments SET speaker = ?1 WHERE id = ?2 AND speaker IS NOT ?1',
-            [_label(voiceFromBytes(r['embedding']), mine, r['speaker_id']), r['segment_id']]);
+            [_label(voiceFromBytes(r['embedding']), mine, notMine, r['speaker_id']), r['segment_id']]);
       }
       db.execute('COMMIT');
     } catch (_) {
@@ -381,12 +390,34 @@ class AppDb {
   int? lineSpeaker(int segmentId) =>
       db.select('SELECT speaker_id FROM voiceprints WHERE segment_id = ?', [segmentId]).firstOrNull?['speaker_id'];
 
-  int voiceSampleCount() => db.select('SELECT count(*) AS n FROM voice_samples').first['n'];
+  /// Lines confirmed as the user's voice; 0 means no voice profile yet.
+  int voiceSampleCount() => db.select('SELECT count(*) AS n FROM voice_samples WHERE mine = 1').first['n'];
 
   /// "That's me": adds this line's voice to the profile and relabels lines that now match it.
   void markAsMe(int segmentId) {
-    db.execute('INSERT INTO voice_samples(embedding) SELECT embedding FROM voiceprints WHERE segment_id = ?', [segmentId]);
+    _addSample(segmentId, mine: true);
+  }
+
+  /// "Not me": this line's voice counts against the profile, and lines closer to it than to the user stop being You.
+  void markNotMe(int segmentId) => _addSample(segmentId, mine: false);
+
+  void _addSample(int segmentId, {required bool mine}) {
+    db.execute('INSERT INTO voice_samples(embedding, mine, segment_id) SELECT embedding, ?, segment_id FROM voiceprints '
+        'WHERE segment_id = ?', [mine ? 1 : 0, segmentId]);
     _relabel();
+  }
+
+  /// Lines the app is unsure are the user's, newest first and never asked before: segment_id, speaker, text,
+  /// chunk_id, start_ms, end_ms. Empty until the user has marked a line as theirs.
+  List<Row> voiceChecks({int limit = 5}) {
+    final mine = _voiceSamples();
+    if (mine.isEmpty) return const [];
+    return [
+      for (final r in db.select('SELECT v.segment_id, v.embedding, t.speaker, t.text, t.chunk_id, t.start_ms, t.end_ms '
+          'FROM voiceprints v JOIN transcript_segments t ON t.id = v.segment_id WHERE v.segment_id NOT IN '
+          '(SELECT segment_id FROM voice_samples WHERE segment_id IS NOT NULL) ORDER BY v.segment_id DESC'))
+        if (isUnsure(myVoiceScore(voiceFromBytes(r['embedding']), mine))) r,
+    ].take(limit).toList();
   }
 
   void resetVoiceProfile() {

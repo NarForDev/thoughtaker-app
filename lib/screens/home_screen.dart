@@ -14,6 +14,7 @@ import 'conversation_screen.dart';
 import 'device_screen.dart';
 import 'items_screen.dart';
 import 'settings_screen.dart';
+import 'voice_check_screen.dart';
 import 'voices_screen.dart';
 
 const _actionable = {'task', 'my_promise', 'their_promise', 'event'};
@@ -81,20 +82,14 @@ class HomeScreen extends StatelessWidget {
                     SectionHeader('Due next', trailing: TextLink('All to-dos', onTap: () => openTab(2))),
                     _DueNext(s: s, items: [for (final i in open) if (_actionable.contains(i.kind)) i]),
                     const SizedBox(height: 8),
-                    IntrinsicHeight(
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        for (final (kind, label) in [('my_promise', 'You promised'), ('their_promise', 'Promised to you')]) ...[
-                          if (kind == 'their_promise') const SizedBox(width: 8),
-                          Expanded(
-                            child: Tile(
-                              label: label,
-                              onTap: () => push(ItemsScreen(s: s, kind: kind)),
-                              child: DotMatrixText('${open.where((i) => i.kind == kind).length}', height: 28),
-                            ),
-                          ),
-                        ],
-                      ]),
-                    ),
+                    if (s.voiceChecks.value.length case final n when n > 0)
+                      Tile(
+                        label: 'Is this you?',
+                        onTap: () => push(VoiceCheckScreen(s: s)),
+                        child: Text(
+                            '${n == 1 ? '1 line' : '$n lines'} to check. Each answer makes voice recognition better.',
+                            style: TextStyles.body),
+                      ),
                     SectionHeader('Recent conversations',
                         trailing: TextLink('Timeline', onTap: () => openTab(1))),
                     if (conversations.isEmpty)

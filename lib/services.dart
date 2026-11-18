@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:sqlite3/sqlite3.dart' show Row;
 
 import 'acting/calendar.dart';
 import 'acting/reminders.dart';
@@ -9,6 +10,9 @@ import 'ai/understanding.dart';
 import 'conversations.dart';
 import 'db.dart';
 import 'pendant.dart';
+
+const _voiceAskedKey = 'voice_asked_ms';
+const _voiceAskEvery = Duration(hours: 6);
 
 /// Everything the screens work with, built once in main().
 class Services {
@@ -30,8 +34,29 @@ class Services {
   final CalendarSync calendar;
   final Directory partialDir;
 
+  /// Lines the app is unsure are yours; each answer teaches the voice profile.
+  final voiceChecks = ValueNotifier<List<Row>>(const []);
+
   /// Fires whenever synced, transcribed or understood data may have changed.
-  late final Listenable changes = Listenable.merge([pendant, transcriber, understanding, calendar]);
+  late final Listenable changes = Listenable.merge([pendant, transcriber, understanding, calendar, voiceChecks]);
+
+  /// Finds lines worth asking about, and asks about one in a notification at most every [_voiceAskEvery].
+  Future<void> refreshVoiceChecks() async {
+    voiceChecks.value = db.voiceChecks();
+    final first = voiceChecks.value.firstOrNull;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final asked = int.tryParse(db.setting(_voiceAskedKey) ?? '') ?? 0;
+    if (first == null || now - asked < _voiceAskEvery.inMilliseconds) return;
+    db.setSetting(_voiceAskedKey, '$now');
+    await reminders.askAboutVoice(first['segment_id'] as int, first['text'] as String);
+  }
+
+  /// Records an answer: the line's voice becomes a sample of yours or of someone else, and every line is relabelled.
+  void answerVoiceCheck(int segmentId, bool mine) {
+    mine ? db.markAsMe(segmentId) : db.markNotMe(segmentId);
+    voiceChecks.value = db.voiceChecks();
+    pendant.dataChanged(); // labels changed everywhere
+  }
 
   List<Chunk> chunksOnDay(String day) => [
         for (final (c, at) in placeChunks(db.chunks()))

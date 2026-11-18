@@ -4,6 +4,7 @@ import '../services.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'conversation_screen.dart';
+import 'voice_check_screen.dart';
 
 /// Every voice heard, so you can say which one is yours and name the others.
 class VoicesScreen extends StatelessWidget {
@@ -27,6 +28,15 @@ class VoicesScreen extends StatelessWidget {
                         'conversations you take part in become to-dos.'
                     : 'Your voice is set up. Name the others so you can search what they said.',
                 style: TextStyles.body),
+            if (s.voiceChecks.value.length case final n when n > 0) ...[
+              const SizedBox(height: 16),
+              PillButton(
+                  label: n == 1 ? 'Check 1 line' : 'Check $n lines',
+                  icon: Icons.fact_check_rounded,
+                  light: true,
+                  onPressed: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => VoiceCheckScreen(s: s)))),
+            ],
             const SizedBox(height: 16),
             if (voices.isEmpty) ...[
               Text(
@@ -94,10 +104,7 @@ class VoicesScreen extends StatelessWidget {
                 label: "That's me",
                 icon: Icons.record_voice_over_rounded,
                 light: true,
-                onPressed: () {
-                  s.db.markAsMe(segmentId);
-                  s.pendant.dataChanged();
-                }),
+                onPressed: () => s.answerVoiceCheck(segmentId, true)),
           PillButton(
               label: 'Rename',
               icon: Icons.edit_rounded,

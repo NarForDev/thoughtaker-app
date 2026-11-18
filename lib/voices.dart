@@ -14,8 +14,21 @@ double cosine(Float32List a, Float32List b) {
   return na == 0 || nb == 0 ? 0 : dot / sqrt(na * nb);
 }
 
-/// True when [voice] is close enough to any sample the user marked as their own.
-bool isMyVoice(Float32List voice, List<Float32List> samples) => samples.any((s) => cosine(voice, s) >= voiceThreshold);
+// Scores this close to the threshold are guesses; those lines are worth asking about.
+const voiceUnsureMargin = 0.12;
+
+/// How close [voice] is to the user's own: the best match among their samples, 0 without any.
+double myVoiceScore(Float32List voice, List<Float32List> samples) =>
+    samples.fold(0.0, (best, s) => max(best, cosine(voice, s)));
+
+/// True when [voice] is close enough to a sample the user marked as theirs, and closer to it than to any line
+/// they said was not them.
+bool isMyVoice(Float32List voice, List<Float32List> mine, [List<Float32List> notMine = const []]) {
+  final score = myVoiceScore(voice, mine);
+  return score >= voiceThreshold && score > myVoiceScore(voice, notMine);
+}
+
+bool isUnsure(double score) => (score - voiceThreshold).abs() < voiceUnsureMargin;
 
 /// The id of the nearest centroid at or above the threshold, or null when [voice] is someone new.
 int? nearestSpeaker(Map<int, Float32List> centroids, Float32List voice) {

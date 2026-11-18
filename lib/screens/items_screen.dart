@@ -126,10 +126,9 @@ String itemStatus(BuildContext context, Item i) {
 
 /// Everything pulled out of conversations, by kind, with what you can do about each one.
 class ItemsScreen extends StatefulWidget {
-  const ItemsScreen({super.key, required this.s, this.kind, this.showBack = true});
+  const ItemsScreen({super.key, required this.s, this.showBack = true});
 
   final Services s;
-  final String? kind; // start filtered to this kind
   final bool showBack;
 
   @override
@@ -137,7 +136,7 @@ class ItemsScreen extends StatefulWidget {
 }
 
 class _ItemsScreenState extends State<ItemsScreen> {
-  late String? _kind = widget.kind; // null = all kinds
+  String? _kind; // null = all kinds
   bool _done = false;
 
   /// Open to-dos swipe right to done, with Undo, as in most mail and to-do apps.

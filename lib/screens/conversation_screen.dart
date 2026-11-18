@@ -153,8 +153,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 if (speakerId == null)
                   const Text('This line is too short to recognise the voice.', style: TextStyles.body)
                 else if (speaker == 'You')
-                  const Text('Recognised as your voice. Reset it in Settings, under Voice profile, if that is wrong.',
-                      style: TextStyles.body)
+                  PillButton(
+                      label: "That's not me",
+                      icon: Icons.voice_over_off_rounded,
+                      onPressed: () {
+                        Navigator.pop(sheet);
+                        widget.s.answerVoiceCheck(segmentId, false);
+                      })
                 else
                   Wrap(spacing: 8, runSpacing: 8, children: [
                     PillButton(
@@ -163,7 +168,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                         light: true,
                         onPressed: () {
                           Navigator.pop(sheet);
-                          setState(() => widget.s.db.markAsMe(segmentId));
+                          widget.s.answerVoiceCheck(segmentId, true);
                         }),
                     PillButton(
                         label: 'Rename speaker',

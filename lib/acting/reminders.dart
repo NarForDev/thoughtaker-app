@@ -7,21 +7,34 @@ const _details = NotificationDetails(
   android: AndroidNotificationDetails('reminders', 'Reminders', importance: Importance.high, priority: Priority.high),
 );
 
-/// Local notifications for items. The notification id is the item id; its payload opens the item's moment.
+// The buttons open the app: answering needs the database, which lives in the app's isolate.
+const _voiceDetails = NotificationDetails(
+  android: AndroidNotificationDetails('voice_checks', 'Voice checks', actions: [
+    AndroidNotificationAction('yes', 'Yes, me', showsUserInterface: true),
+    AndroidNotificationAction('no', 'Not me', showsUserInterface: true),
+  ]),
+);
+const _voiceCheckId = 0x40000000; // apart from item ids, which are reminder ids
+const _voicePrefix = 'voice:';
+
+/// Local notifications: reminders for items (the notification id is the item id; its payload opens the item's
+/// moment) and "Is this you?" voice checks.
 class Reminders {
-  Reminders(this.db, {required this.onOpen});
+  Reminders(this.db, {required this.onOpen, required this.onVoiceCheck});
 
   final AppDb db;
   final void Function(int itemId) onOpen;
+  final void Function(int segmentId, bool? mine) onVoiceCheck; // mine is null when tapped without answering
   final _plugin = FlutterLocalNotificationsPlugin();
 
   Future<void> init() async {
     await _plugin.initialize(
       settings: const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')),
-      onDidReceiveNotificationResponse: (r) => _open(r.payload),
+      onDidReceiveNotificationResponse: _open,
     );
     final launch = await _plugin.getNotificationAppLaunchDetails();
-    if (launch?.didNotificationLaunchApp ?? false) _open(launch!.notificationResponse?.payload);
+    final response = launch?.notificationResponse;
+    if ((launch?.didNotificationLaunchApp ?? false) && response != null) _open(response);
     // Drop reminders whose item was finished, dismissed or deleted while the app was closed.
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final i in db.items()) {
@@ -30,10 +43,24 @@ class Reminders {
     }
   }
 
-  void _open(String? payload) {
-    final id = int.tryParse(payload ?? '');
+  void _open(NotificationResponse r) {
+    final payload = r.payload ?? '';
+    if (payload.startsWith(_voicePrefix)) {
+      final id = int.tryParse(payload.substring(_voicePrefix.length));
+      if (id != null) onVoiceCheck(id, switch (r.actionId) { 'yes' => true, 'no' => false, _ => null });
+      return;
+    }
+    final id = int.tryParse(payload);
     if (id != null) onOpen(id);
   }
+
+  /// Asks whether the line [segmentId] was the user speaking. One at a time: a new question replaces the last.
+  Future<void> askAboutVoice(int segmentId, String quote) => _plugin.show(
+      id: _voiceCheckId,
+      title: 'Is this you?',
+      body: '“$quote”',
+      notificationDetails: _voiceDetails,
+      payload: '$_voicePrefix$segmentId');
 
   Future<bool> notificationsAllowed() async =>
       await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()

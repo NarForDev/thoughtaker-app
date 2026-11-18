@@ -21,6 +21,20 @@ void main() {
     expect(isMyVoice(v([1, 0]), [v([0, 1])]), isFalse);
   });
 
+  test('a "not me" sample closer than any of yours overrules a match', () {
+    final mine = [v([1, 0])], notMine = [v([0.8, 0.6])];
+    expect(isMyVoice(v([0.85, 0.5]), mine), isTrue);
+    expect(isMyVoice(v([0.85, 0.5]), mine, notMine), isFalse);
+    expect(isMyVoice(v([1, 0.05]), mine, notMine), isTrue);
+  });
+
+  test('scores near the threshold are unsure, clear ones are not', () {
+    expect(isUnsure(voiceThreshold), isTrue);
+    expect(isUnsure(voiceThreshold + voiceUnsureMargin + 0.01), isFalse);
+    expect(isUnsure(0.05), isFalse);
+    expect(myVoiceScore(v([1, 0]), []), 0);
+  });
+
   test('nearestSpeaker picks the closest centroid above the threshold, else null', () {
     final c = {1: v([1, 0]), 2: v([0.8, 0.6])};
     expect(nearestSpeaker(c, v([0.7, 0.7])), 2);
@@ -103,6 +117,24 @@ void main() {
       db.relabelOlder();
       expect(db.isTranscribed(chunk), isTrue);
       expect(db.isTranscribed(quiet), isFalse);
+    });
+
+    test('unsure lines are asked about once; "not me" relabels them and teaches the profile', () {
+      db.saveTranscript(chunk, [
+        (startMs: 0, endMs: 2000, text: 'I will send the budget', voice: me),
+        (startMs: 2000, endMs: 4000, text: 'thanks, budget by Friday', voice: asha),
+        (startMs: 4000, endMs: 6000, text: 'sounds a bit like me', voice: v([0.5, 0.85, 0])),
+      ]);
+      expect(db.voiceChecks(), isEmpty); // no profile yet, nothing to compare with
+      final segs = db.segments(chunk);
+      db.markAsMe(segs[0]['id'] as int);
+      expect(speakers(), ['You', 'Person 2', 'You']); // a weak match still counts as you
+      final unsure = db.voiceChecks().single;
+      expect(unsure['segment_id'], segs[2]['id']);
+      db.markNotMe(segs[2]['id'] as int);
+      expect(speakers(), ['You', 'Person 2', 'Person 2']);
+      expect(db.voiceChecks(), isEmpty); // answered, never asked again
+      expect(db.voiceSampleCount(), 1); // "not me" samples do not count as your voice
     });
 
     test('speakerSamples lists each voice once, most lines first, with its newest line as the sample', () {

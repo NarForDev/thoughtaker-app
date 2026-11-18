@@ -14,6 +14,7 @@ import 'screens/conversation_screen.dart';
 import 'services.dart';
 import 'screens/app_shell.dart';
 import 'screens/onboarding_screen.dart';
+import 'screens/voice_check_screen.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -32,6 +33,10 @@ Future<void> main() async {
   final reminders = Reminders(db, onOpen: (id) {
     final i = db.item(id), context = navigator.currentContext;
     if (i != null && context != null) openConversationAt(context, services, i.chunkId, i.atMs);
+  }, onVoiceCheck: (segmentId, mine) {
+    // An answer from the notification's buttons counts at once; the screen then offers the rest.
+    if (mine != null) services.answerVoiceCheck(segmentId, mine);
+    navigator.currentState?.push(MaterialPageRoute<void>(builder: (_) => VoiceCheckScreen(s: services)));
   });
   final calendar = CalendarSync(db);
   understanding.addListener(() {
@@ -47,8 +52,13 @@ Future<void> main() async {
     calendar: calendar,
     partialDir: partial,
   );
+  // New transcripts bring new lines to check once a batch is done.
+  transcriber.addListener(() {
+    if (!transcriber.working) services.refreshVoiceChecks();
+  });
   runApp(ThoughtakerApp(s: services, navigator: navigator));
   await reminders.init(); // after runApp, so a launch from a notification can navigate
+  await services.refreshVoiceChecks();
   await calendar.sync();
 }
 
