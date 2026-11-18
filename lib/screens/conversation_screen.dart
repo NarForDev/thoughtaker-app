@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../adpcm.dart';
+import '../ai/on_device_transcription.dart' show noiseTag;
 import '../ai/understanding.dart' show itemKinds;
 import '../conversations.dart';
 import '../db.dart';
@@ -249,6 +250,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           final segments = widget.s.db.segments(c.id);
           if (segments.isEmpty && !widget.s.db.isTranscribed(c.id)) pending++;
           for (final s in segments) {
+            if (noiseTag.hasMatch(s['text'] as String)) continue; // "[Music]" from before captions were dropped
             final ms = s['start_ms'] as int;
             final at = _offsets[i] + ms;
             final cs = c.startMs;
@@ -259,7 +261,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               onTap: () => _seek(at),
               onLongPress: () => _voiceActions(s['id'] as int, s['speaker'] as String?),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${s['speaker'] ?? 'Unknown'} · ${cs == null ? formatDuration(at) : clockTime(context, cs + ms)}',
+                Text('${s['speaker'] ?? 'Someone'} · ${cs == null ? formatDuration(at) : clockTime(context, cs + ms)}',
                     style: TextStyles.caption),
                 const SizedBox(height: 4),
                 Text(s['text'] as String, style: TextStyles.body.copyWith(color: Palette.textHi)),

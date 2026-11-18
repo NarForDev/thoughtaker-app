@@ -78,7 +78,7 @@ class PendantController extends ChangeNotifier {
     try {
       await body();
     } catch (e) {
-      _say('$what failed: $e');
+      _say(e is UniversalBleException ? "$what failed: can't reach your pendant. Is it on and nearby?" : '$what failed: $e');
     } finally {
       busy = false;
       notifyListeners();
@@ -368,6 +368,7 @@ class PendantController extends ChangeNotifier {
         path: dest.path,
       );
       chunksStored++;
+      db.setSetting(_lastSyncKey, '${DateTime.now().millisecondsSinceEpoch}'); // got data, even if the sync stops later
       notifyListeners();
       // Only now, with the file fsynced and the row committed, may the device delete its copy.
       await _request(opAck, [...u32(e.seq), ...u32(h.crc)]);

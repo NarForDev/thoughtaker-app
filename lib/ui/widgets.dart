@@ -178,10 +178,14 @@ class PillButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(999),
           border: light ? null : Border.all(color: danger ? Palette.danger : Palette.stroke),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[Icon(icon, size: 18, color: fg), const SizedBox(width: 8)],
-          Text(label, style: TextStyles.label.copyWith(color: fg)),
-        ]),
+        // Centred when the button is stretched full width; hugs its label otherwise.
+        child: Center(
+          widthFactor: 1,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[Icon(icon, size: 18, color: fg), const SizedBox(width: 8)],
+            Text(label, style: TextStyles.label.copyWith(color: fg)),
+          ]),
+        ),
       ),
     );
   }
@@ -190,11 +194,18 @@ class PillButton extends StatelessWidget {
 /// Borderless text field in a rounded box, like the reference's prompt input.
 class PillInput extends StatelessWidget {
   const PillInput(
-      {super.key, required this.hint, this.controller, this.onSubmitted, this.autofocus = false, this.icon});
+      {super.key,
+      required this.hint,
+      this.controller,
+      this.onSubmitted,
+      this.onChanged,
+      this.autofocus = false,
+      this.icon});
 
   final String hint;
   final TextEditingController? controller;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
   final bool autofocus;
   final IconData? icon;
 
@@ -213,6 +224,7 @@ class PillInput extends StatelessWidget {
               controller: controller,
               autofocus: autofocus,
               onSubmitted: onSubmitted,
+              onChanged: onChanged,
               textInputAction: TextInputAction.search,
               style: TextStyles.body.copyWith(color: Palette.textHi),
               decoration: InputDecoration.collapsed(hintText: hint, hintStyle: TextStyles.body),
@@ -279,19 +291,22 @@ class ListRow extends StatelessWidget {
           dimWhenDisabled: false,
           child: Opacity(
             opacity: dim ? 0.5 : 1,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Palette.surfaceTop, Palette.surface]),
-                borderRadius: BorderRadius.circular(20),
-                border: Border(
-                  left: BorderSide(color: marked ? Palette.signal : Palette.stroke, width: marked ? 3 : 1),
-                  top: const BorderSide(color: Palette.stroke),
+            // The clip rounds the corners: a rounded border must be one colour, and the bookmark bar is not.
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Palette.surfaceTop, Palette.surface]),
+                  border: Border(
+                    left: BorderSide(color: marked ? Palette.signal : Palette.stroke, width: marked ? 3 : 1),
+                    top: const BorderSide(color: Palette.stroke),
+                  ),
                 ),
+                child: child,
               ),
-              child: child,
             ),
           ),
         ),

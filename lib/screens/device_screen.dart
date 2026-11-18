@@ -157,8 +157,8 @@ class DeviceScreen extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                           n == 0
-                              ? "No samples yet. Long-press one of your lines in a conversation and choose That's me."
-                              : '$n sample(s). Your lines are labelled You.',
+                              ? 'Not set up. Set it up in Settings, under Voice profile.'
+                              : 'Set up. Your lines are labelled You.',
                           style: TextStyles.caption),
                     ]),
                   ),
@@ -204,7 +204,7 @@ class DeviceScreen extends StatelessWidget {
             if (understanding.error != null)
               Text(understanding.error!, style: TextStyles.body.copyWith(color: Palette.danger)),
             const SizedBox(height: 16),
-            const Text('Link to the pendant is encrypted (bonded BLE). Audio on its SD card is not encrypted until it syncs.',
+            const Text('The link to the pendant is encrypted. Audio on its card is not encrypted until it syncs.',
                 style: TextStyles.caption),
           ],
         );

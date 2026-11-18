@@ -28,12 +28,27 @@ class VoicesScreen extends StatelessWidget {
                     : 'Your voice is set up. Name the others so you can search what they said.',
                 style: TextStyles.body),
             const SizedBox(height: 16),
-            if (voices.isEmpty)
+            if (voices.isEmpty) ...[
               Text(
-                  s.transcriber.modelsReady
-                      ? 'No voices yet. They show up as conversations are transcribed.'
-                      : 'Voices are recognised once the speech models are downloaded.',
-                  style: TextStyles.body)
+                  !s.transcriber.modelsReady
+                      ? 'Voices are recognised once the speech models are downloaded.'
+                      : s.transcriber.working
+                          ? 'Listening through your conversations for voices…'
+                          : 'No voices yet. They show up as conversations are transcribed.',
+                  style: TextStyles.body),
+              // Conversations transcribed before the voice model existed never get voices on their own.
+              if (s.transcriber.modelsReady && !s.transcriber.working && s.db.spokenChunkIds().isNotEmpty) ...[
+                const SizedBox(height: 16),
+                PillButton(
+                    label: 'Find voices in older conversations',
+                    icon: Icons.record_voice_over_rounded,
+                    light: true,
+                    onPressed: () {
+                      s.db.relabelOlder();
+                      s.transcriber.kick();
+                    }),
+              ],
+            ]
             else
               for (final v in voices) _row(context, v['speaker_id'] as int, v['speaker'] as String?, v['lines'] as int,
                   v['text'] as String, v['segment_id'] as int, v['chunk_id'] as int, v['start_ms'] as int),

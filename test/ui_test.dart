@@ -1,9 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:thoughtaker_app/db.dart';
 import 'package:thoughtaker_app/screens/home_screen.dart';
 import 'package:thoughtaker_app/conversations.dart';
 import 'package:thoughtaker_app/ui/painters.dart';
+import 'package:thoughtaker_app/ui/widgets.dart';
 
 void main() {
   test('dot-matrix glyphs cover every character the app draws, 7 rows of 5 bits', () {
@@ -34,5 +36,11 @@ void main() {
     add(4, null); // borrows seq 3's time, so today
     add(1, null, storeId: 2); // no neighbour to borrow from: unplaced
     expect(todayTotals(placeChunks(db.chunks()), DateTime(2026, 11, 18, 15)), (speechMs: 120000, chunks: 3));
+  });
+
+  testWidgets('a marked row paints its text (a rounded two-colour border threw and blanked it)', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: ListRow(marked: true, child: Text('Send the deck'))));
+    expect(tester.takeException(), isNull);
+    expect(find.text('Send the deck'), findsOneWidget);
   });
 }

@@ -33,6 +33,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (_step == _steps - 1) return _finish();
     setState(() => _step++);
     if (_step == 1 && !s.pendant.hasDevice && !s.pendant.busy) s.pendant.scan();
+    if (_step == _steps - 1) {
+      s.reminders.notificationsAllowed().then((ok) {
+        if (ok && mounted) setState(() => _notifications = true); // a tick, not "Allow", when already allowed
+      });
+    }
   }
 
   void _finish() {

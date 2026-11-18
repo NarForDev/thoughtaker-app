@@ -400,6 +400,10 @@ class AppDb {
     _relabel();
   }
 
+  /// Queues chunks transcribed before the voice model existed to be transcribed again, so their voices are found.
+  void relabelOlder() => db.execute('DELETE FROM transcribed WHERE chunk_id NOT IN '
+      '(SELECT s.chunk_id FROM transcript_segments s JOIN voiceprints v ON v.segment_id = s.id)');
+
   /// Each voice heard, most lines first, with its newest line as a sample: speaker_id, lines, segment_id,
   /// speaker (its label), text, chunk_id, start_ms.
   List<Row> speakerSamples() => db.select('SELECT v.speaker_id, count(*) AS lines, max(t.id) AS segment_id, '
@@ -419,7 +423,7 @@ class AppDb {
     final match = query
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty)
-        .map((w) => '"${w.replaceAll('"', '""')}"')
+        .map((w) => '"${w.replaceAll('"', '""')}"*') // prefix match: "meet" finds "meeting"
         .join(' ');
     if (match.isEmpty) {
       if (speaker == null) return [];
@@ -431,7 +435,8 @@ class AppDb {
     }
     return db
         .select(
-            "SELECT s.chunk_id, s.start_ms, s.speaker, snippet(transcript_fts, 0, '[', ']', '…', 12) AS snippet "
+            // char(2)/char(3) mark matches for the screen to highlight; brackets showed up as text.
+            "SELECT s.chunk_id, s.start_ms, s.speaker, snippet(transcript_fts, 0, char(2), char(3), '…', 12) AS snippet "
             'FROM transcript_fts JOIN transcript_segments s ON s.id = transcript_fts.rowid '
             'WHERE transcript_fts MATCH ? ${speaker == null ? '' : 'AND s.speaker = ?'} ORDER BY rank LIMIT 200',
             [match, ?speaker])

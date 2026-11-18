@@ -26,7 +26,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<String> _days = []; // days whose summary or topics match
 
   void _search() => setState(() {
-        _hits = widget.s.db.search(_query, speaker: _person);
+        _hits = _query.trim().isEmpty && _person == null ? null : widget.s.db.search(_query, speaker: _person);
         final words = _query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
         _days = _person != null || words.isEmpty
             ? []
@@ -43,6 +43,19 @@ class _SearchScreenState extends State<SearchScreen> {
     final ms = start + h.startMs;
     return '${MaterialLocalizations.of(context).formatShortMonthDay(DateTime.fromMillisecondsSinceEpoch(ms))}, '
         '${clockTime(context, ms)}';
+  }
+
+  /// Matches come wrapped in char(2)…char(3): bright and bold, the rest dimmer. No marks means a person's whole
+  /// line, shown bright.
+  static TextSpan _highlight(String snippet) {
+    final parts = snippet.split(RegExp(r'[\x02\x03]'));
+    final hi = TextStyles.body.copyWith(color: Palette.textHi);
+    return TextSpan(children: [
+      for (final (i, p) in parts.indexed)
+        TextSpan(
+            text: p,
+            style: parts.length == 1 ? hi : (i.isOdd ? hi.copyWith(fontWeight: FontWeight.w600) : TextStyles.body)),
+    ]);
   }
 
   void _open(SearchHit h) => openConversationAt(context, widget.s, h.chunkId, h.startMs);
@@ -63,7 +76,7 @@ class _SearchScreenState extends State<SearchScreen> {
           hint: 'Words, people, topics',
           icon: Icons.search_rounded,
           autofocus: true,
-          onSubmitted: (q) {
+          onChanged: (q) {
             _query = q;
             _search();
           },
@@ -110,7 +123,7 @@ class _SearchScreenState extends State<SearchScreen> {
             ListRow(
               onTap: () => _open(h),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(h.snippet, style: TextStyles.body.copyWith(color: Palette.textHi)),
+                Text.rich(_highlight(h.snippet)),
                 const SizedBox(height: 4),
                 Text('${h.speaker ?? 'Someone'}, ${_saidAt(h)}', style: TextStyles.caption),
               ]),

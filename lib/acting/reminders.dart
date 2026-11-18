@@ -35,6 +35,11 @@ class Reminders {
     if (id != null) onOpen(id);
   }
 
+  Future<bool> notificationsAllowed() async =>
+      await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.areNotificationsEnabled() ??
+      false;
+
   /// Asks to show notifications. False if the user said no.
   Future<bool> requestPermission() async =>
       await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()

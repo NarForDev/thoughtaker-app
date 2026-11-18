@@ -26,12 +26,20 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _tab = 0;
+  bool _searchOpened = false; // Search keeps its query and results once opened
 
-  void _go(int tab) => setState(() => _tab = tab);
+  void _go(int tab) {
+    FocusManager.instance.primaryFocus?.unfocus(); // the keyboard does not follow you to another tab
+    setState(() {
+      _tab = tab;
+      _searchOpened |= tab == 3;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final typing = MediaQuery.viewInsetsOf(context).bottom > 0;
     return PopScope(
       canPop: _tab == 0,
       onPopInvokedWithResult: (didPop, _) {
@@ -40,20 +48,20 @@ class _AppShellState extends State<AppShell> {
       child: Scaffold(
         body: Column(children: [
           Expanded(
-            // The bar takes the bottom inset, so the tabs must not pad for it again.
-            child: MediaQuery.removePadding(
-              context: context,
-              removeBottom: true,
+            // The shell already makes room for the bar and the keyboard; the tabs must not do it again.
+            // One MediaQuery: nested remove* helpers each rebuild from the outer data and undo each other.
+            child: MediaQuery(
+              data: MediaQuery.of(context).removePadding(removeBottom: true).removeViewInsets(removeBottom: true),
               child: IndexedStack(index: _tab, children: [
                 HomeScreen(s: s, openTab: _go),
                 TimelineScreen(s: s, showBack: false),
                 ItemsScreen(s: s, showBack: false),
-                // Built only once opened, so its field does not grab the keyboard at launch.
-                if (_tab == 3) SearchScreen(s: s, showBack: false) else const SizedBox.shrink(),
+                // Built once first opened, so its field does not grab the keyboard at launch.
+                if (_searchOpened) SearchScreen(s: s, showBack: false) else const SizedBox.shrink(),
               ]),
             ),
           ),
-          _NavBar(tab: _tab, onTap: _go),
+          if (!typing) _NavBar(tab: _tab, onTap: _go), // hidden while typing, as in most apps
         ]),
       ),
     );

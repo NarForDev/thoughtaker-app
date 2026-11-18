@@ -41,7 +41,7 @@ void main() {
     final hits = db.search('budget email');
     expect(hits.single.chunkId, id);
     expect(hits.single.startMs, 1200);
-    expect(hits.single.snippet, contains('[budget]'));
+    expect(hits.single.snippet, contains('\x02budget\x03')); // marked for highlighting
     expect(db.search('AND OR "'), isEmpty); // FTS syntax in user input must not throw
     db.db.execute('DELETE FROM transcript_segments');
     expect(db.search('budget'), isEmpty);

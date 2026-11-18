@@ -87,6 +87,24 @@ void main() {
       expect(db.search('Asha').length, 3); // FTS indexes the new speaker name
     });
 
+    test('search matches word starts and marks the match for highlighting', () {
+      save();
+      final hit = db.search('budg').first;
+      expect(hit.snippet, contains('\x02budget\x03'));
+      expect(db.search('thank').single.startMs, 2000);
+    });
+
+    test('relabelOlder re-queues only chunks that have no voices', () {
+      final quiet = db.insertChunk(
+          storeId: 1, seq: 2, bootId: 1, flags: 1, startUptimeMs: 0, startMs: 60000, durationMs: 60000,
+          bookmarksMs: const [], crc: 2, path: '/x/2.wav');
+      save();
+      db.saveTranscript(quiet, [(startMs: 0, endMs: 900, text: 'hello there', voice: null)]);
+      db.relabelOlder();
+      expect(db.isTranscribed(chunk), isTrue);
+      expect(db.isTranscribed(quiet), isFalse);
+    });
+
     test('speakerSamples lists each voice once, most lines first, with its newest line as the sample', () {
       save();
       final rows = db.speakerSamples();
