@@ -8,12 +8,14 @@ import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
 import 'conversation_screen.dart';
+import 'device_screen.dart';
 
 class TimelineScreen extends StatefulWidget {
-  const TimelineScreen({super.key, required this.s, this.day});
+  const TimelineScreen({super.key, required this.s, this.day, this.showBack = true});
 
   final Services s;
   final String? day; // show only this day (YYYY-MM-DD), e.g. from a topic search
+  final bool showBack;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -87,8 +89,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
           }
           rows.addAll(list.map(_row));
         }
+        final p = widget.s.pendant;
         return ScreenFrame(
           title: day == null ? 'Timeline' : loc.formatMediumDate(DateTime.parse(day)),
+          showBack: widget.showBack,
+          onRefresh: p.hasDevice ? p.syncNow : null,
           action: CircleIconButton(
             icon: _onlyBookmarks ? Icons.star_rounded : Icons.star_outline_rounded,
             tooltip: _onlyBookmarks ? 'Show all' : 'Only bookmarked',
@@ -100,8 +105,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   const SizedBox(height: 48),
                   const Center(child: HalftoneSphere(size: 160)),
                   const SizedBox(height: 24),
-                  Text(_onlyBookmarks ? 'No bookmarked conversations.' : 'No conversations yet.\nPair the pendant from Home.',
-                      textAlign: TextAlign.center, style: TextStyles.body),
+                  Text(
+                      _onlyBookmarks
+                          ? 'No bookmarked conversations.'
+                          : p.hasDevice
+                              ? 'No conversations yet. Pull down to sync.'
+                              : 'No conversations yet. Pair your pendant to start.',
+                      textAlign: TextAlign.center,
+                      style: TextStyles.body),
+                  if (!p.hasDevice && !_onlyBookmarks) ...[
+                    const SizedBox(height: 16),
+                    Center(
+                      child: PillButton(
+                        label: 'Pair pendant',
+                        light: true,
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => DeviceScreen(
+                                pendant: p, transcriber: widget.s.transcriber, understanding: widget.s.understanding))),
+                      ),
+                    ),
+                  ],
                 ],
         );
       },

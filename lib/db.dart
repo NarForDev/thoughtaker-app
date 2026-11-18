@@ -400,6 +400,12 @@ class AppDb {
     _relabel();
   }
 
+  /// Each voice heard, most lines first, with its newest line as a sample: speaker_id, lines, segment_id,
+  /// speaker (its label), text, chunk_id, start_ms.
+  List<Row> speakerSamples() => db.select('SELECT v.speaker_id, count(*) AS lines, max(t.id) AS segment_id, '
+      't.speaker, t.text, t.chunk_id, t.start_ms FROM voiceprints v JOIN transcript_segments t ON t.id = v.segment_id '
+      'WHERE v.speaker_id IS NOT NULL GROUP BY v.speaker_id ORDER BY lines DESC, v.speaker_id'); // bare columns follow max()
+
   /// Everyone heard so far, for filtering search.
   List<String> people() => [
         for (final r in db.select(

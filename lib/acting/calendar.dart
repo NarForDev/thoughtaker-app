@@ -73,6 +73,10 @@ class CalendarSync extends ChangeNotifier {
     db.setEventId(i.id, null);
   }
 
+  /// Shows the entry in the calendar app. False if no app can show it.
+  Future<bool> open(int eventId) async =>
+      await calendarChannel.invokeMethod<bool>('open', {'eventId': eventId}) ?? false;
+
   Future<int?> _insert(Item i) {
     final due = DateTime.fromMillisecondsSinceEpoch(i.dueMs!);
     final allDay = due.hour == 0 && due.minute == 0; // the model gave a date only

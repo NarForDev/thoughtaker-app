@@ -86,5 +86,14 @@ void main() {
       expect(db.search(''), isEmpty);
       expect(db.search('Asha').length, 3); // FTS indexes the new speaker name
     });
+
+    test('speakerSamples lists each voice once, most lines first, with its newest line as the sample', () {
+      save();
+      final rows = db.speakerSamples();
+      expect([for (final r in rows) (r['speaker'], r['lines'], r['text'])],
+          [('Person 2', 2, 'see you then'), ('Person 1', 1, 'I will send the budget'), ('Person 3', 1, 'bye')]);
+      db.markAsMe(rows[1]['segment_id'] as int);
+      expect(db.speakerSamples()[1]['speaker'], 'You');
+    });
   });
 }

@@ -7,6 +7,8 @@ import '../services.dart';
 import '../ui/format.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
+import 'onboarding_screen.dart';
+import 'voices_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.s});
@@ -106,20 +108,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
             else if (s.calendar.enabled)
               const Text('Done or dismissed items are removed from your calendar again.', style: TextStyles.caption),
             const SectionHeader('Wake word'),
-            const PillToggle(label: 'Bookmark by saying "Perthro mark"', value: false),
-            const SizedBox(height: 6),
-            const Text('Needs the pendant\'s wake-word firmware, which is still being trained.', style: TextStyles.caption),
-            const SectionHeader('Voice profile'),
-            Text(
-                s.db.voiceSampleCount() == 0
-                    ? 'Not set up. In a conversation, long-press one of your own lines and choose "That\'s me".'
-                    : '${s.db.voiceSampleCount()} samples of your voice. Your lines are labelled "You".',
+            const Text(
+                'Say "Perthro" to start or stop recording and "Perthro mark" to bookmark a moment. This arrives with '
+                'a pendant update; until then the pendant records whenever it hears speech.',
                 style: TextStyles.body),
+            const SectionHeader('Voice profile'),
+            ListRow(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => VoicesScreen(s: s))),
+              child: Row(children: [
+                Expanded(
+                  child: Text(
+                      s.db.voiceSampleCount() == 0
+                          ? 'Not set up. Pick your voice so your lines are labelled You.'
+                          : 'Set up. Your lines are labelled You.',
+                      style: TextStyles.body),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: Palette.textMid),
+              ]),
+            ),
             const SectionHeader('Delete'),
             Wrap(spacing: 8, runSpacing: 8, children: [
               PillButton(label: 'Delete a day', icon: Icons.event_busy_rounded, onPressed: _deleteDay),
               PillButton(label: 'Delete everything', danger: true, onPressed: _deleteEverything),
             ]),
+            const SectionHeader('Setup'),
+            PillButton(
+                label: 'Set up again',
+                icon: Icons.restart_alt_rounded,
+                onPressed: () =>
+                    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => OnboardingScreen(s: s)))),
             const SizedBox(height: 32),
             const Text(
                 'The link between pendant and phone is encrypted. Audio on the pendant\'s card is not encrypted '

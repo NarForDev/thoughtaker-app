@@ -13,9 +13,8 @@ import '../ui/widgets.dart';
 import 'conversation_screen.dart';
 import 'device_screen.dart';
 import 'items_screen.dart';
-import 'search_screen.dart';
 import 'settings_screen.dart';
-import 'timeline_screen.dart';
+import 'voices_screen.dart';
 
 const _actionable = {'task', 'my_promise', 'their_promise', 'event'};
 
@@ -34,9 +33,10 @@ const _actionable = {'task', 'my_promise', 'their_promise', 'event'};
 
 /// Your day at a glance, with every part of the app one tap away.
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.s});
+  const HomeScreen({super.key, required this.s, required this.openTab});
 
   final Services s;
+  final ValueChanged<int> openTab; // 1 Timeline, 2 To-dos, 3 Search
 
   @override
   Widget build(BuildContext context) {
@@ -53,20 +53,22 @@ class HomeScreen extends StatelessWidget {
               listenable: s.changes,
               builder: (context, _) {
                 final now = DateTime.now();
+                final p = s.pendant;
                 final conversations = groupConversations(s.db.chunks());
                 final today = [
                   for (final v in conversations)
                     if (v.hasSpeech && v.startMs != null && dayKey(v.startMs!) == dayKey(now.millisecondsSinceEpoch)) v,
                 ];
                 final open = s.db.items(state: 'open');
-                return ListView(
+                return refreshable(p.hasDevice ? p.syncNow : null, ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                   children: [
                     Row(children: [
-                      CircleIconButton(
-                          icon: Icons.tune_rounded, tooltip: 'Settings', onPressed: () => push(SettingsScreen(s: s))),
-                      const Spacer(),
                       _StatusChip(s: s, onTap: () => push(device)),
+                      const Spacer(),
+                      CircleIconButton(
+                          icon: Icons.settings_rounded, tooltip: 'Settings', onPressed: () => push(SettingsScreen(s: s))),
                     ]),
                     const SizedBox(height: 24),
                     Text(_greeting(now), style: TextStyles.display),
@@ -75,8 +77,8 @@ class HomeScreen extends StatelessWidget {
                         style: TextStyles.body.copyWith(color: Palette.textHi)),
                     const SizedBox(height: 24),
                     ..._setup(context, push, device),
-                    _TodayCard(s: s, today: today, onTap: () => push(TimelineScreen(s: s))),
-                    SectionHeader('Due next', trailing: TextLink('All items', onTap: () => push(ItemsScreen(s: s)))),
+                    _TodayCard(s: s, today: today, onTap: () => openTab(1)),
+                    SectionHeader('Due next', trailing: TextLink('All to-dos', onTap: () => openTab(2))),
                     _DueNext(s: s, items: [for (final i in open) if (_actionable.contains(i.kind)) i]),
                     const SizedBox(height: 8),
                     IntrinsicHeight(
@@ -94,17 +96,21 @@ class HomeScreen extends StatelessWidget {
                       ]),
                     ),
                     SectionHeader('Recent conversations',
-                        trailing: TextLink('Timeline', onTap: () => push(TimelineScreen(s: s)))),
+                        trailing: TextLink('Timeline', onTap: () => openTab(1))),
                     if (conversations.isEmpty)
-                      const Text('Your conversations show up here after the pendant syncs.', style: TextStyles.body)
+                      Text(
+                          p.hasDevice
+                              ? 'Your conversations show up here after the pendant syncs. Pull down to sync now.'
+                              : 'Your conversations show up here once a pendant is paired.',
+                          style: TextStyles.body)
                     else
                       for (final v in conversations.where((v) => v.hasSpeech).take(3)) _ConversationRow(s: s, v: v),
                     const SizedBox(height: 16),
-                    _SearchPill(onTap: () => push(SearchScreen(s: s))),
+                    _SearchPill(onTap: () => openTab(3)),
                     const SizedBox(height: 16),
                     _PendantTile(s: s, onTap: () => push(device)),
                   ],
-                );
+                ));
               },
             ),
           ),
@@ -116,20 +122,32 @@ class HomeScreen extends StatelessWidget {
   static String _greeting(DateTime now) =>
       now.hour < 12 ? 'Good morning' : (now.hour < 18 ? 'Good afternoon' : 'Good evening');
 
-  /// One card listing what is left to set up, in the order it unlocks features.
+  /// One card listing what is left to set up, in the order it unlocks features. Downloads run in place.
   List<Widget> _setup(BuildContext context, void Function(Widget) push, Widget device) {
-    final steps = [
+    final t = s.transcriber, u = s.understanding;
+    String pct(double p) => '${(p * 100).floor()}%';
+    final steps = <(String, VoidCallback?)>[
       if (!s.pendant.hasDevice) ('Pair your pendant', () => push(device)),
-      if (!s.transcriber.modelsReady) ('Download speech models', () => push(device)),
-      if (!s.understanding.modelReady) ('Download the AI model', () => push(device)),
+      if (!t.modelsReady)
+        t.downloading ? ('Speech models ${pct(t.downloadProgress)}', null) : ('Download speech models', t.downloadModels),
+      if (!u.modelReady)
+        u.downloading ? ('AI model ${pct(u.downloadProgress)}', null) : ('Download the AI model', u.downloadModel),
       if (s.calendar.enabled && !s.calendar.hasAccess) ('Connect your calendar', () => s.calendar.connect()),
+      if (s.db.voiceSampleCount() == 0 && s.db.speakerSamples().isNotEmpty)
+        ('Teach it your voice', () => push(VoicesScreen(s: s))),
     ];
     if (steps.isEmpty) return const [];
     return [
       Tile(
         label: 'Finish setting up',
-        child: Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final (i, (label, go)) in steps.indexed) PillButton(label: label, light: i == 0, onPressed: go),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final (i, (label, go)) in steps.indexed) PillButton(label: label, light: i == 0, onPressed: go),
+          ]),
+          if (t.error ?? u.error case final e?) ...[
+            const SizedBox(height: 8),
+            Text(e, style: TextStyles.caption.copyWith(color: Palette.danger)),
+          ],
         ]),
       ),
       const SizedBox(height: 16),

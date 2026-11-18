@@ -76,8 +76,13 @@ void showItemActions(BuildContext context, Services s, Item i) {
                     label: i.remindMs == null ? 'Remind me' : 'Change reminder',
                     icon: Icons.notifications_rounded,
                     onPressed: () => run(() => remindItem(context, s, i))),
-                if (i.eventId != null)
-                  const PillButton(label: 'In your calendar', icon: Icons.event_available_rounded)
+                if (i.eventId case final event?)
+                  PillButton(
+                      label: 'In your calendar',
+                      icon: Icons.event_available_rounded,
+                      onPressed: () => run(() async {
+                            if (!await s.calendar.open(event) && context.mounted) _say(context, 'No calendar app found');
+                          }))
                 else if (belongsInCalendar(i, DateTime.now()) && !s.calendar.hasAccess)
                   PillButton(
                       label: 'Connect calendar', icon: Icons.event_rounded, onPressed: () => run(s.calendar.connect))
@@ -121,10 +126,11 @@ String itemStatus(BuildContext context, Item i) {
 
 /// Everything pulled out of conversations, by kind, with what you can do about each one.
 class ItemsScreen extends StatefulWidget {
-  const ItemsScreen({super.key, required this.s, this.kind});
+  const ItemsScreen({super.key, required this.s, this.kind, this.showBack = true});
 
   final Services s;
   final String? kind; // start filtered to this kind
+  final bool showBack;
 
   @override
   State<ItemsScreen> createState() => _ItemsScreenState();
@@ -134,7 +140,34 @@ class _ItemsScreenState extends State<ItemsScreen> {
   late String? _kind = widget.kind; // null = all kinds
   bool _done = false;
 
+  /// Open to-dos swipe right to done, with Undo, as in most mail and to-do apps.
   Widget _row(Item i) {
+    if (i.state != 'open') return _card(i);
+    final s = widget.s;
+    return Dismissible(
+      key: ValueKey(i.id),
+      direction: DismissDirection.startToEnd,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(left: 20),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(color: Palette.signal, borderRadius: BorderRadius.circular(20)),
+        child: const Icon(Icons.check_rounded, color: Palette.bg),
+      ),
+      onDismissed: (_) {
+        setItemState(s, i, 'done');
+        setState(() {}); // the DB changed synchronously; the swiped row must leave the list now
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+              content: const Text('Marked done'),
+              action: SnackBarAction(label: 'Undo', onPressed: () => setItemState(s, i, 'open'))));
+      },
+      child: _card(i),
+    );
+  }
+
+  Widget _card(Item i) {
     final said = i.saidMs;
     return ListRow(
       marked: i.remindMs != null || i.eventId != null,
@@ -160,8 +193,9 @@ class _ItemsScreenState extends State<ItemsScreen> {
         final all = s.db.items().where((i) => _done ? i.state != 'open' : i.state == 'open');
         final shown = [for (final i in all) if (_kind == null || i.kind == _kind) i];
         return ScreenFrame(
-          title: _done ? 'Done' : 'Items',
+          title: _done ? 'Done' : 'To-dos',
           wash: headerViolet,
+          showBack: widget.showBack,
           action: CircleIconButton(
             icon: _done ? Icons.inbox_rounded : Icons.done_all_rounded,
             tooltip: _done ? 'Show open items' : 'Show done and dismissed',
@@ -192,12 +226,24 @@ class _ItemsScreenState extends State<ItemsScreen> {
               ]),
             ),
             const SizedBox(height: 16),
-            if (shown.isEmpty)
+            if (shown.isEmpty) ...[
               Text(
                   _done
-                      ? 'Nothing done yet.'
-                      : 'Nothing here yet. Tasks, promises, plans and facts show up as conversations are understood.',
-                  style: TextStyles.body)
+                      ? 'Nothing done yet. Swipe a to-do right to mark it done.'
+                      : !s.understanding.modelReady
+                          ? 'To-dos are found by the on-phone AI. Download it to start.'
+                          : 'Nothing here yet. Tasks, promises and plans you talk about show up here.',
+                  style: TextStyles.body),
+              if (!_done && !s.understanding.modelReady) ...[
+                const SizedBox(height: 16),
+                PillButton(
+                    label: s.understanding.downloading
+                        ? 'Downloading ${(s.understanding.downloadProgress * 100).floor()}%'
+                        : 'Download the AI model',
+                    light: true,
+                    onPressed: s.understanding.downloading ? null : s.understanding.downloadModel),
+              ],
+            ]
             else
               ...shown.map(_row),
           ],

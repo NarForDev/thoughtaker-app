@@ -312,10 +312,19 @@ class ControlPanel extends StatelessWidget {
       );
 }
 
-/// Every pushed screen: header wash, circle back button, centred title, scrolling [children], optional bottom [panel].
+/// Every screen: header wash, circle back button (not on tabs), centred title, scrolling [children], optional
+/// bottom [panel]. [onRefresh] adds pull down to sync.
 class ScreenFrame extends StatelessWidget {
   const ScreenFrame(
-      {super.key, required this.title, required this.children, this.action, this.wash, this.panel, this.controller});
+      {super.key,
+      required this.title,
+      required this.children,
+      this.action,
+      this.wash,
+      this.panel,
+      this.controller,
+      this.showBack = true,
+      this.onRefresh});
 
   final String title;
   final List<Widget> children;
@@ -323,6 +332,8 @@ class ScreenFrame extends StatelessWidget {
   final Gradient? wash;
   final Widget? panel;
   final ScrollController? controller;
+  final bool showBack;
+  final Future<void> Function()? onRefresh;
 
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
@@ -339,19 +350,23 @@ class ScreenFrame extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(children: [
-                      CircleIconButton(
-                          icon: Icons.arrow_back_rounded,
-                          tooltip: 'Back',
-                          onPressed: () => Navigator.of(context).maybePop()),
+                      if (showBack)
+                        CircleIconButton(
+                            icon: Icons.arrow_back_rounded,
+                            tooltip: 'Back',
+                            onPressed: () => Navigator.of(context).maybePop())
+                      else
+                        const SizedBox(width: 44),
                       Expanded(child: Text(title, textAlign: TextAlign.center, style: TextStyles.title)),
                       action ?? const SizedBox(width: 44),
                     ]),
                   ),
                 ),
-                Expanded(
-                  child: ListView(
-                      controller: controller, padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: children),
-                ),
+                Expanded(child: refreshable(onRefresh, ListView(
+                    controller: controller,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    children: children))),
                 ?panel,
               ]),
             ),
@@ -359,6 +374,11 @@ class ScreenFrame extends StatelessWidget {
         ),
       );
 }
+
+/// Pull down to run [onRefresh], in the app's colours; [list] as it is when null.
+Widget refreshable(Future<void> Function()? onRefresh, Widget list) => onRefresh == null
+    ? list
+    : RefreshIndicator(onRefresh: onRefresh, color: Palette.textHi, backgroundColor: Palette.surfaceHigh, child: list);
 
 /// Bottom sheet in the app's style; returns true when [confirm] is tapped.
 Future<bool> confirmSheet(BuildContext context, {required String title, required String body, required String confirm}) async {

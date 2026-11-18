@@ -99,7 +99,7 @@ class DeviceScreen extends StatelessWidget {
               const SizedBox(height: 8),
               IntrinsicHeight(
                 child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Expanded(child: _stat('Waiting to sync', '${s.pendingChunks}', 'chunks')),
+                  Expanded(child: _stat('Waiting to sync', '${s.pendingChunks}', 'minutes of audio')),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Tile(
@@ -142,7 +142,7 @@ class DeviceScreen extends StatelessWidget {
                 Expanded(
                   child: Text(t.working ? 'Transcribing…' : 'Waiting to transcribe', style: TextStyles.label),
                 ),
-                Text('$pending chunks', style: TextStyles.caption),
+                Text('$pending min', style: TextStyles.caption),
               ]),
             ),
             if (t.error != null) Text(t.error!, style: TextStyles.body.copyWith(color: Palette.danger)),

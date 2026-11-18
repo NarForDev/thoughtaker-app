@@ -9,9 +9,10 @@ import 'conversation_screen.dart';
 import 'timeline_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, required this.s});
+  const SearchScreen({super.key, required this.s, this.showBack = true});
 
   final Services s;
+  final bool showBack;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -35,6 +36,15 @@ class _SearchScreenState extends State<SearchScreen> {
               ]..sort((a, b) => b.compareTo(a));
       });
 
+  /// When the line was said, rather than where it sits in its one-minute recording.
+  String _saidAt(SearchHit h) {
+    final start = widget.s.db.chunk(h.chunkId)?.startMs;
+    if (start == null) return 'time unknown';
+    final ms = start + h.startMs;
+    return '${MaterialLocalizations.of(context).formatShortMonthDay(DateTime.fromMillisecondsSinceEpoch(ms))}, '
+        '${clockTime(context, ms)}';
+  }
+
   void _open(SearchHit h) => openConversationAt(context, widget.s, h.chunkId, h.startMs);
 
   @override
@@ -44,6 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
     return ScreenFrame(
       title: 'Search',
       wash: headerBlue,
+      showBack: widget.showBack,
       children: [
         const SizedBox(height: 16),
         const Text('Find anything', style: TextStyles.display),
@@ -101,7 +112,7 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(h.snippet, style: TextStyles.body.copyWith(color: Palette.textHi)),
                 const SizedBox(height: 4),
-                Text('${h.speaker ?? 'Unknown'} · ${formatDuration(h.startMs)}', style: TextStyles.caption),
+                Text('${h.speaker ?? 'Someone'}, ${_saidAt(h)}', style: TextStyles.caption),
               ]),
             ),
       ],

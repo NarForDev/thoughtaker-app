@@ -103,6 +103,13 @@ final appTheme = ThemeData(
     error: Palette.danger,
   ),
   textSelectionTheme: const TextSelectionThemeData(cursorColor: Palette.signal),
+  snackBarTheme: SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    backgroundColor: Palette.surfaceHigh,
+    contentTextStyle: TextStyles.body.copyWith(color: Palette.textHi),
+    actionTextColor: Palette.signal,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Palette.stroke)),
+  ),
   pageTransitionsTheme: const PageTransitionsTheme(
       builders: {TargetPlatform.android: FadeForwardsPageTransitionsBuilder()}),
 );

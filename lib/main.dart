@@ -12,7 +12,8 @@ import 'db.dart';
 import 'pendant.dart';
 import 'screens/conversation_screen.dart';
 import 'services.dart';
-import 'screens/home_screen.dart';
+import 'screens/app_shell.dart';
+import 'screens/onboarding_screen.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -63,7 +64,7 @@ class ThoughtakerApp extends StatelessWidget {
       title: 'Thoughtaker',
       theme: appTheme,
       navigatorKey: navigator,
-      home: HomeScreen(s: s),
+      home: s.db.setting(onboardedKey) == null ? OnboardingScreen(s: s) : AppShell(s: s),
     );
   }
 }

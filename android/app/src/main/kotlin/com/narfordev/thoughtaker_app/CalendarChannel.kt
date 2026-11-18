@@ -1,9 +1,11 @@
 package com.narfordev.thoughtaker_app
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
@@ -38,6 +40,12 @@ object CalendarChannel {
                     val id = call.argument<Number>("eventId")!!.toLong()
                     if (granted(app)) app.contentResolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, id), null, null)
                     result.success(null)
+                }
+                "open" -> {
+                    val id = call.argument<Number>("eventId")!!.toLong()
+                    val view = Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(Events.CONTENT_URI, id))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    result.success(try { app.startActivity(view); true } catch (e: ActivityNotFoundException) { false })
                 }
                 else -> result.notImplemented()
             }

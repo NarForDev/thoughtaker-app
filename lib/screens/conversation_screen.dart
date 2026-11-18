@@ -14,6 +14,7 @@ import '../ui/format.dart';
 import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
+import 'items_screen.dart' show showItemActions;
 
 /// Opens the conversation holding [chunkId], playing from [seekMs] into that chunk.
 void openConversationAt(BuildContext context, Services s, int chunkId, int seekMs) {
@@ -21,6 +22,40 @@ void openConversationAt(BuildContext context, Services s, int chunkId, int seekM
   if (v == null) return;
   Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => ConversationScreen(s: s, conversation: v, chunkId: chunkId, seekMs: seekMs)));
+}
+
+/// Asks for a speaker's name in a sheet. Null when cancelled or left empty.
+Future<String?> askSpeakerName(BuildContext context, String? current) async {
+  final name = TextEditingController(text: current); // not disposed: the closing sheet still reads it
+  final ok = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Palette.surface,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+    builder: (sheet) => Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Rename speaker', style: TextStyles.title),
+            const SizedBox(height: 8),
+            const Text('Give two speakers the same name to treat them as one person.', style: TextStyles.body),
+            const SizedBox(height: 16),
+            PillInput(hint: 'Name', controller: name, autofocus: true, onSubmitted: (_) => Navigator.pop(sheet, true)),
+            const SizedBox(height: 24),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              PillButton(label: 'Cancel', onPressed: () => Navigator.pop(sheet, false)),
+              const SizedBox(width: 8),
+              PillButton(label: 'Save', light: true, onPressed: () => Navigator.pop(sheet, true)),
+            ]),
+          ]),
+        ),
+      ),
+    ),
+  );
+  final n = name.text.trim();
+  return ok == true && n.isNotEmpty ? n : null;
 }
 
 /// One conversation: its transcript and playback across all its chunks.
@@ -117,7 +152,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 if (speakerId == null)
                   const Text('This line is too short to recognise the voice.', style: TextStyles.body)
                 else if (speaker == 'You')
-                  const Text('Recognised as your voice. Reset the voice profile on the Pendant screen if that is wrong.',
+                  const Text('Recognised as your voice. Reset it in Settings, under Voice profile, if that is wrong.',
                       style: TextStyles.body)
                 else
                   Wrap(spacing: 8, runSpacing: 8, children: [
@@ -144,36 +179,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
       );
 
   Future<void> _rename(int speakerId, String? current) async {
-    final name = TextEditingController(text: current); // not disposed: the closing sheet still reads it
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Palette.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-      builder: (sheet) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Rename speaker', style: TextStyles.title),
-              const SizedBox(height: 8),
-              const Text('Give two speakers the same name to treat them as one person.', style: TextStyles.body),
-              const SizedBox(height: 16),
-              PillInput(hint: 'Name', controller: name, autofocus: true, onSubmitted: (_) => Navigator.pop(sheet, true)),
-              const SizedBox(height: 24),
-              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                PillButton(label: 'Cancel', onPressed: () => Navigator.pop(sheet, false)),
-                const SizedBox(width: 8),
-                PillButton(label: 'Save', light: true, onPressed: () => Navigator.pop(sheet, true)),
-              ]),
-            ]),
-          ),
-        ),
-      ),
-    );
-    final n = name.text.trim();
-    if (ok == true && n.isNotEmpty && mounted) setState(() => widget.s.db.renameSpeaker(speakerId, n));
+    final n = await askSpeakerName(context, current);
+    if (n != null && mounted) setState(() => widget.s.db.renameSpeaker(speakerId, n));
   }
 
   Widget _panel() => ControlPanel(
@@ -231,7 +238,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           for (final item in widget.s.db.chunkItems(c.id)) {
             found.add(ListRow(
               marked: true,
-              onTap: () => _seek(_offsets[i] + item.atMs),
+              onTap: () => showItemActions(context, widget.s, item),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(itemKinds[item.kind]!, style: TextStyles.caption),
                 const SizedBox(height: 2),

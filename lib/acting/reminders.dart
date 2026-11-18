@@ -35,10 +35,15 @@ class Reminders {
     if (id != null) onOpen(id);
   }
 
+  /// Asks to show notifications. False if the user said no.
+  Future<bool> requestPermission() async =>
+      await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission() !=
+      false;
+
   /// Schedules a reminder for [i] at [atMs]. False if the user refused notifications.
   Future<bool> schedule(Item i, int atMs) async {
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    if (await android?.requestNotificationsPermission() == false) return false;
+    if (!await requestPermission()) return false;
     // UTC is enough for a one-shot reminder: it fires at the same instant in any zone.
     await _plugin.zonedSchedule(
       id: i.id,
