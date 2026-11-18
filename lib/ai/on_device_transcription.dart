@@ -54,6 +54,9 @@ const List<ModelFile> models = [
 
 final modelBytes = models.fold<int>(0, (n, m) => n + m.size);
 
+/// Whisper's non-speech captions, e.g. "[Music]" or "(crowd cheering)".
+final noiseTag = RegExp(r'^\s*[\[(].*[\])]\s*$');
+
 // shortcut: shorter regions are left unlabelled; calibrate on the user's own recordings.
 const minVoiceMs = 1500;
 
@@ -129,7 +132,9 @@ List<Segment> recognizeChunk(String modelDir, int asrAddress, String chunkPath) 
       final text = asr.getResult(stream).text.trim();
       stream.free();
       final (start, end) = segmentMs(region.start, region.samples.length);
-      if (text.isNotEmpty) out.add((startMs: start, endMs: end, text: text, voice: voiceOf(region.samples)));
+      if (text.isNotEmpty && !noiseTag.hasMatch(text)) {
+        out.add((startMs: start, endMs: end, text: text, voice: voiceOf(region.samples)));
+      }
     }
   }
 

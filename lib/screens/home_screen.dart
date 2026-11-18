@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:material_ui/material_ui.dart';
 
+import '../ai/on_device_transcription.dart' show noiseTag;
 import '../ai/understanding.dart' show dayKey;
 import '../conversations.dart';
 import '../db.dart';
@@ -15,6 +16,8 @@ import 'items_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'timeline_screen.dart';
+
+const _actionable = {'task', 'my_promise', 'their_promise', 'event'};
 
 /// Speech time and chunk count for the local day of [now], using the times [placeChunks] gave each chunk.
 ({int speechMs, int chunks}) todayTotals(List<(Chunk, int?)> placed, DateTime now) {
@@ -74,7 +77,7 @@ class HomeScreen extends StatelessWidget {
                     ..._setup(context, push, device),
                     _TodayCard(s: s, today: today, onTap: () => push(TimelineScreen(s: s))),
                     SectionHeader('Due next', trailing: TextLink('All items', onTap: () => push(ItemsScreen(s: s)))),
-                    _DueNext(s: s, items: open),
+                    _DueNext(s: s, items: [for (final i in open) if (_actionable.contains(i.kind)) i]),
                     const SizedBox(height: 8),
                     IntrinsicHeight(
                       child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -301,7 +304,7 @@ class _ConversationRow extends StatelessWidget {
     final start = v.startMs;
     // First real line; Whisper writes non-speech as tags like "[Music]".
     final first = [for (final c in v.chunks.take(3)) ...s.db.segments(c.id)]
-        .where((l) => !RegExp(r'^\s*[\[(].*[\])]\s*$').hasMatch(l['text'] as String))
+        .where((l) => !noiseTag.hasMatch(l['text'] as String))
         .firstOrNull;
     return ListRow(
       marked: v.bookmarked,

@@ -11,6 +11,7 @@ import 'package:sqlite3/sqlite3.dart' show Row;
 import '../conversations.dart';
 import '../db.dart';
 import 'download.dart';
+import 'on_device_transcription.dart' show noiseTag;
 
 const ModelFile llmModel = (
   name: 'Qwen3-1.7B-Q4_K_M.gguf',
@@ -31,18 +32,20 @@ const itemKinds = {
 
 typedef Generate = Future<String> Function(String system, String user, Map<String, Object> schema);
 
-const _system = '''You read a transcript recorded by a pendant the user wears, and list what is worth acting on.
+const _system = '''You read a transcript recorded by a pendant the user wears, and pick out only what the user would
+want written down. Most transcripts have nothing: TV, music, small talk and chatter give an empty list.
 Kinds:
-- task: something the user should do
-- my_promise: the user committed to do something for someone
-- their_promise: someone committed to do something for the user
-- event: a meeting, appointment or dated plan
-- decision: something that was decided
-- fact: a name, number or fact worth remembering
+- task: something the user has to do
+- my_promise: the user said they would do something for someone
+- their_promise: someone said they would do something for the user
+- event: a meeting, appointment or plan with a day or time
+- decision: something the user agreed with others
+- fact: a name, number or address the user will want to look up later
 Each line starts with who said it. The user's own lines are labelled "You"; anyone else is a name, "Person N" or "Speaker".
-"line" is the number of the transcript line it comes from. "text" is a short plain summary, at most 15 words.
-"due" is the date or date-time it is due or happens, as YYYY-MM-DD or YYYY-MM-DDTHH:MM, or "" if none was said.
-Only list what is actually in the transcript. Small talk gives an empty list.''';
+"line" is the number of the transcript line it comes from.
+"text" says what to do or remember in your own words, at most 12 words; never copy the line.
+"due" is when it is due or happens, only if the line says so (tomorrow, Friday, 5 pm), as YYYY-MM-DD or
+YYYY-MM-DDTHH:MM; otherwise "".''';
 
 const _schema = {
   'type': 'json_schema',
@@ -138,9 +141,33 @@ List<(String, List<Chunk>)> staleDays(
   );
 }
 
+const _weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// The line says when: a day, part of a day or clock time (kal/aaj/parso too).
+final _when = RegExp(
+    r'\b(today|tonight|tomorrow|kal|aaj|parso|morning|afternoon|evening|noon|weekend|next (week|month)|'
+    r'monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|'
+    r'september|october|november|december|\d{1,2}(:\d\d)?\s*(am|pm|o.?clock)|\d{1,2}(st|nd|rd|th)\b|\d{1,2}:\d\d)',
+    caseSensitive: false);
+// A digit, or a capitalised word other than "I" that does not start a sentence.
+final _nameOrNumber = RegExp(r'\d|(?<![.!?]\s)(?<!^)\b(?!I\b)[A-Z][a-z]+');
+
+List<String> _words(String s) => s.toLowerCase().split(RegExp(r'[^a-z0-9]+')).where((w) => w.isNotEmpty).toList();
+
+/// A small model pulls "items" out of TV and chatter: captions, fragments, whole lines copied as they are,
+/// or text unrelated to the line it cites. Facts also need a name or a number.
+bool _worthKeeping(String kind, String text, String said) {
+  final s = _words(said), t = _words(text);
+  if (noiseTag.hasMatch(said) || s.length < 4) return false;
+  if (t.length > 15 || (t.length >= 4 && t.length >= s.length * 0.8 && s.join(' ').contains(t.join(' ')))) return false;
+  if (!t.any((w) => w.length >= 4 && s.contains(w))) return false;
+  return kind != 'fact' || _nameOrNumber.hasMatch(said);
+}
+
 /// The user message: when it was said, then the numbered transcript lines.
 String buildPrompt(List<Row> segments, DateTime? saidAt, DateTime now) {
-  final b = StringBuffer('Today is ${now.toIso8601String().substring(0, 16)}.\n');
+  // Day only: given the clock time, the model copied it in as every item's due time.
+  final b = StringBuffer('Today is ${_weekdays[now.weekday - 1]} ${dayKey(now.millisecondsSinceEpoch)}.\n');
   if (saidAt != null) b.writeln('This was said at ${saidAt.toIso8601String().substring(0, 16)}.');
   b.writeln('Transcript:');
   for (var i = 0; i < segments.length; i++) {
@@ -149,8 +176,9 @@ String buildPrompt(List<Row> segments, DateTime? saidAt, DateTime now) {
   return b.toString();
 }
 
-/// Model output is untrusted: keeps only well-formed items that point at a real line.
-List<NewItem> parseItems(String json, List<int> segmentIds) {
+/// Model output is untrusted: keeps well-formed items worth keeping about a real line. A due date counts only
+/// when that line says when.
+List<NewItem> parseItems(String json, List<Row> segments) {
   final Object? decoded;
   try {
     decoded = jsonDecode(json);
@@ -164,14 +192,15 @@ List<NewItem> parseItems(String json, List<int> segmentIds) {
     if (e is! Map) continue;
     final kind = e['kind'], line = e['line'], text = e['text'], due = e['due'];
     if (kind is! String || !itemKinds.containsKey(kind)) continue;
-    if (line is! int || line < 1 || line > segmentIds.length) continue;
+    if (line is! int || line < 1 || line > segments.length) continue;
     if (text is! String || text.trim().isEmpty) continue;
-    final t = text.trim();
+    final said = segments[line - 1]['text'] as String, t = text.trim();
+    if (!_worthKeeping(kind, t, said)) continue;
     out.add((
-      segmentId: segmentIds[line - 1],
+      segmentId: segments[line - 1]['id'] as int,
       kind: kind,
       text: t.length > 300 ? t.substring(0, 300) : t,
-      dueMs: due is String ? DateTime.tryParse(due)?.millisecondsSinceEpoch : null,
+      dueMs: due is String && _when.hasMatch(said) ? DateTime.tryParse(due)?.millisecondsSinceEpoch : null,
     ));
   }
   return out;
@@ -217,14 +246,18 @@ class UnderstandingService extends ChangeNotifier {
           final generate = _generateOverride ?? _generate;
           final next = db.nextUnextracted();
           if (next != null) {
+            final segments = db.segments(next.id);
+            if (_notYours(next.id)) {
+              db.saveItems(next.id, const []);
+              continue;
+            }
             working = true;
             notifyListeners();
-            final segments = db.segments(next.id);
             final start = next.startMs;
             final reply = await generate(_system,
                 buildPrompt(segments, start == null ? null : DateTime.fromMillisecondsSinceEpoch(start), DateTime.now()),
                 _schema);
-            db.saveItems(next.id, parseItems(reply, [for (final s in segments) s['id'] as int]));
+            db.saveItems(next.id, parseItems(reply, segments));
           } else {
             // Items first; then summaries for days that changed.
             final stale = staleDays(db.chunks(), db.spokenChunkIds(),
@@ -251,6 +284,14 @@ class UnderstandingService extends ChangeNotifier {
       await engine?.dispose();
       notifyListeners();
     }
+  }
+
+  /// Once you've taught it your voice, a conversation you never spoke in is TV or other people talking.
+  /// Undecided while part of it is still untranscribed.
+  bool _notYours(int chunkId) {
+    if (db.voiceSampleCount() == 0) return false;
+    final v = groupConversations(db.chunks()).firstWhere((v) => v.chunks.any((c) => c.id == chunkId));
+    return v.chunks.every((c) => db.isTranscribed(c.id) && !db.segments(c.id).any((s) => s['speaker'] == 'You'));
   }
 
   /// The day's lines in order, capped so the prompt fits the context window.

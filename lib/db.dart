@@ -68,6 +68,8 @@ class Item {
 
 typedef NewItem = ({int segmentId, String kind, String text, int? dueMs});
 
+const _itemsVersionKey = 'items_version';
+
 const _itemSelect = 'SELECT i.*, s.chunk_id, s.start_ms, s.speaker, s.text AS quote, c.start_ms AS chunk_start_ms '
     'FROM items i JOIN transcript_segments s ON s.id = i.segment_id JOIN chunks c ON c.id = s.chunk_id';
 
@@ -142,6 +144,17 @@ class AppDb {
     // Columns added after the table first shipped.
     final itemColumns = {for (final r in db.select('PRAGMA table_info(items)')) r['name']};
     if (!itemColumns.contains('event_id')) db.execute('ALTER TABLE items ADD COLUMN event_id INTEGER');
+    // Calendar entries whose item went away (re-transcribed or re-read), for the calendar sync to delete.
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS stale_events(event_id INTEGER PRIMARY KEY);
+      CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items WHEN old.event_id IS NOT NULL BEGIN
+        INSERT OR IGNORE INTO stale_events VALUES (old.event_id);
+      END;''');
+    // Items are filtered more strictly since v2: read every conversation again, once.
+    if (setting(_itemsVersionKey) == null) {
+      db.execute('DELETE FROM extracted');
+      setSetting(_itemsVersionKey, '2');
+    }
   }
 
   final Database db;
@@ -297,6 +310,10 @@ class AppDb {
   void setReminder(int id, int? atMs) => db.execute('UPDATE items SET remind_ms = ? WHERE id = ?', [atMs, id]);
 
   void setEventId(int id, int? eventId) => db.execute('UPDATE items SET event_id = ? WHERE id = ?', [eventId, id]);
+
+  List<int> staleEvents() => [for (final r in db.select('SELECT event_id FROM stale_events')) r['event_id'] as int];
+
+  void dropStaleEvent(int eventId) => db.execute('DELETE FROM stale_events WHERE event_id = ?', [eventId]);
 
   /// Items of these chunks that still have a calendar event or a reminder to clean up.
   List<Item> itemsOfChunks(List<int> chunkIds) => db

@@ -78,7 +78,7 @@ void showItemActions(BuildContext context, Services s, Item i) {
                     onPressed: () => run(() => remindItem(context, s, i))),
                 if (i.eventId != null)
                   const PillButton(label: 'In your calendar', icon: Icons.event_available_rounded)
-                else if (belongsInCalendar(i) && !s.calendar.hasAccess)
+                else if (belongsInCalendar(i, DateTime.now()) && !s.calendar.hasAccess)
                   PillButton(
                       label: 'Connect calendar', icon: Icons.event_rounded, onPressed: () => run(s.calendar.connect))
                 else if (i.kind == 'event' || i.dueMs != null)

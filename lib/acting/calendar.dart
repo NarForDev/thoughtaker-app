@@ -6,9 +6,13 @@ import '../db.dart';
 const calendarChannel = MethodChannel('thoughtaker/calendar');
 const _syncKey = 'calendar_sync';
 
-/// Open items with a date that are something to do or attend; these live in the phone calendar.
-bool belongsInCalendar(Item i) =>
-    i.state == 'open' && i.dueMs != null && const {'task', 'my_promise', 'their_promise', 'event'}.contains(i.kind);
+/// Worth a calendar entry: an open plan, task or promise of yours, for a day that was actually said, today or later.
+/// Promises made to you stay in the app until you ask for a reminder.
+bool belongsInCalendar(Item i, DateTime now) =>
+    i.state == 'open' &&
+    i.dueMs != null &&
+    i.dueMs! >= DateTime(now.year, now.month, now.day).millisecondsSinceEpoch &&
+    const {'task', 'my_promise', 'event'}.contains(i.kind);
 
 /// Keeps the user's calendar in step with items: adds dated ones (with an alert an hour before a timed one),
 /// removes them once done, dismissed or deleted. The calendar syncs them to the user's account.
@@ -45,14 +49,19 @@ class CalendarSync extends ChangeNotifier {
   Future<void> _sync() async {
     await refreshAccess();
     if (!hasAccess) return;
+    final now = DateTime.now();
     for (final i in db.items()) {
-      final wanted = enabled && belongsInCalendar(i);
-      if (wanted && i.eventId == null) {
+      if (i.eventId == null) {
+        if (!enabled || !belongsInCalendar(i, now)) continue;
         final id = await _insert(i);
         if (id != null) db.setEventId(i.id, id);
-      } else if (!wanted && i.eventId != null) {
+      } else if (!enabled || i.state != 'open') { // past entries stay as a record
         await remove(i);
       }
+    }
+    for (final id in db.staleEvents()) {
+      await calendarChannel.invokeMethod<void>('delete', {'eventId': id});
+      db.dropStaleEvent(id);
     }
     notifyListeners();
   }

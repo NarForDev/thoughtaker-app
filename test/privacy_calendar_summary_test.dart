@@ -55,6 +55,18 @@ void main() {
       expect(db.items(), isEmpty);
     });
 
+    test('conversations are read again once after the item filter changed, not on every open', () {
+      final raw = sqlite3.openInMemory();
+      final first = AppDb(raw);
+      final c = first.insertChunk(
+          storeId: 1, seq: 1, bootId: 1, flags: 1, startUptimeMs: 0, startMs: 0, durationMs: 1, bookmarksMs: const [], crc: 1, path: 'p');
+      first.saveTranscript(c, [(startMs: 0, endMs: 1, text: 'x', voice: null)]);
+      first.saveItems(c, const []);
+      expect(AppDb(raw).nextUnextracted(), isNull); // version already recorded on first open
+      raw.execute("DELETE FROM settings WHERE key = 'items_version'");
+      expect(AppDb(raw).nextUnextracted()?.id, c);
+    });
+
     test('the event_id column is added once to an existing items table', () {
       final raw = sqlite3.openInMemory();
       AppDb(raw);
@@ -103,10 +115,13 @@ void main() {
       });
     });
 
+    // Relative to today, so the tests keep passing as the calendar moves on.
+    final today = DateTime.now();
+    final inTwoDays = DateTime(today.year, today.month, today.day + 2);
+
     test('open dated items go to the calendar once, and leave it when done', () async {
       final c = chunk(1, startMs: 0);
-      final timed = DateTime(2026, 11, 20, 15).millisecondsSinceEpoch;
-      final id = item(c, 'task', dueMs: timed);
+      final id = item(c, 'task', dueMs: inTwoDays.add(const Duration(hours: 15)).millisecondsSinceEpoch);
       final sync = CalendarSync(db);
       await sync.sync();
       await sync.sync();
@@ -121,21 +136,51 @@ void main() {
       expect(db.item(id)!.eventId, isNull);
     });
 
-    test('date-only items become all-day events at UTC midnight; undated items and facts stay out', () async {
+    test('date-only items become all-day events at UTC midnight', () async {
       final c = chunk(1, startMs: 0);
-      item(c, 'event', dueMs: DateTime(2026, 11, 21).millisecondsSinceEpoch);
-      final sync = CalendarSync(db);
-      await sync.sync();
+      item(c, 'event', dueMs: inTwoDays.millisecondsSinceEpoch);
+      await CalendarSync(db).sync();
       final insert = calls.singleWhere((c) => c.method == 'insert').arguments as Map;
       expect(insert['allDay'], isTrue);
-      expect(insert['beginMs'], DateTime.utc(2026, 11, 21).millisecondsSinceEpoch);
+      expect(insert['beginMs'], DateTime.utc(inTwoDays.year, inTwoDays.month, inTwoDays.day).millisecondsSinceEpoch);
       expect(insert['alertMinutes'], isNull);
-      expect(belongsInCalendar(db.items().single), isTrue);
+    });
+
+    test('only your own dated plans go in: not facts, promises made to you, undated or past items', () {
+      final c = chunk(1, startMs: 0);
+      final ahead = inTwoDays.millisecondsSinceEpoch;
+      bool goes(String kind, int? due) => belongsInCalendar(db.item(item(c, kind, dueMs: due))!, today);
+      expect(goes('task', ahead), isTrue);
+      expect(goes('my_promise', ahead), isTrue);
+      expect(goes('event', DateTime(today.year, today.month, today.day).millisecondsSinceEpoch), isTrue);
+      expect(goes('their_promise', ahead), isFalse);
+      expect(goes('fact', ahead), isFalse);
+      expect(goes('task', null), isFalse);
+      expect(goes('event', DateTime(today.year, today.month, today.day - 1).millisecondsSinceEpoch), isFalse);
+    });
+
+    test('an entry already in the calendar stays once its day has passed', () async {
+      final c = chunk(1, startMs: 0);
+      final id = item(c, 'event', dueMs: DateTime(today.year, today.month, today.day - 3).millisecondsSinceEpoch);
+      db.setEventId(id, 55);
+      await CalendarSync(db).sync();
+      expect(calls.where((c) => c.method == 'delete'), isEmpty);
+    });
+
+    test('re-reading a conversation deletes the calendar entries of the items it replaced', () async {
+      final c = chunk(1, startMs: 0);
+      final id = item(c, 'task', dueMs: inTwoDays.millisecondsSinceEpoch);
+      db.setEventId(id, 77);
+      db.saveItems(c, const []);
+      expect(db.staleEvents(), [77]);
+      await CalendarSync(db).sync();
+      expect(calls.where((c) => c.method == 'delete').single.arguments, {'eventId': 77});
+      expect(db.staleEvents(), isEmpty);
     });
 
     test('nothing is written without calendar access or with sync off', () async {
       final c = chunk(1, startMs: 0);
-      item(c, 'task', dueMs: DateTime(2026, 11, 20, 15).millisecondsSinceEpoch);
+      item(c, 'task', dueMs: inTwoDays.millisecondsSinceEpoch);
       granted = false;
       await CalendarSync(db).sync();
       expect(calls.where((c) => c.method == 'insert'), isEmpty);

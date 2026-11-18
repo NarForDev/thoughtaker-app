@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -22,29 +23,88 @@ void main() {
       crc: seq,
       path: '/x/$seq.wav');
 
+  List<Row> lines(List<String> texts) {
+    final c = chunk(100 + texts.length);
+    db.saveTranscript(c, [for (final (i, t) in texts.indexed) (startMs: i * 1000, endMs: i * 1000 + 900, text: t, voice: null)]);
+    return db.segments(c);
+  }
+
+  String reply(List<(String, int, String, String)> items) => jsonEncode({
+        'items': [for (final (kind, line, text, due) in items) {'kind': kind, 'line': line, 'text': text, 'due': due}],
+      });
+
   test('parseItems keeps only well-formed items that point at a real line', () {
-    const reply = '''{"items": [
+    final l = lines(['Dentist on Friday at 3:30 pm, remember that', "I'll send Ravi the deck tomorrow",
+      'The gate code is 4412 for the building']);
+    const json = '''{"items": [
       {"kind": "my_promise", "line": 2, "text": " Send Ravi the deck ", "due": "2026-11-20"},
-      {"kind": "event", "line": 1, "text": "Dentist", "due": "2026-11-21T15:30"},
+      {"kind": "event", "line": 1, "text": "Dentist appointment", "due": "2026-11-21T15:30"},
       {"kind": "hack", "line": 1, "text": "x", "due": ""},
-      {"kind": "task", "line": 3, "text": "out of range", "due": ""},
+      {"kind": "task", "line": 4, "text": "out of range", "due": ""},
       {"kind": "task", "line": 1, "text": "   ", "due": ""},
       {"kind": "fact", "line": "1", "text": "line is a string", "due": ""},
-      {"kind": "fact", "line": 1, "text": "Gate code 4412", "due": "someday"}
+      {"kind": "fact", "line": 3, "text": "Gate code 4412", "due": "someday"}
     ]}''';
-    final items = parseItems(reply, [10, 20]);
+    final items = parseItems(json, l);
     expect([for (final i in items) (i.segmentId, i.kind, i.text)], [
-      (20, 'my_promise', 'Send Ravi the deck'),
-      (10, 'event', 'Dentist'),
-      (10, 'fact', 'Gate code 4412'),
+      (l[1]['id'], 'my_promise', 'Send Ravi the deck'),
+      (l[0]['id'], 'event', 'Dentist appointment'),
+      (l[2]['id'], 'fact', 'Gate code 4412'),
     ]);
     expect(items[0].dueMs, DateTime(2026, 11, 20).millisecondsSinceEpoch);
     expect(items[1].dueMs, DateTime(2026, 11, 21, 15, 30).millisecondsSinceEpoch);
     expect(items[2].dueMs, isNull);
-    expect(parseItems('not json', [1]), isEmpty);
-    expect(parseItems('{"items": 3}', [1]), isEmpty);
-    expect(parseItems('{"items": [{"kind":"task","line":1,"text":"${'a' * 400}","due":""}]}', [1]).single.text.length,
-        300);
+    expect(parseItems('not json', l), isEmpty);
+    expect(parseItems('{"items": 3}', l), isEmpty);
+  });
+
+  test('parseItems drops what a small model pulls out of TV: captions, fragments, copies, unrelated text', () {
+    // Real lines and items from the phone, recorded next to a TV.
+    final l = lines([
+      '[Music]',
+      '(crowd cheering)',
+      'Yes.',
+      'set this new original version.',
+      "It's not that we have friends over and we're sent us to the original audition.",
+      'The door is not here, friends over at work.',
+      'The right answer. Everyone listen for their key. Only everyone listen for...',
+      "I don't need a replacement for low-key. I don't need a replacement for lowkey.",
+    ]);
+    expect(
+        parseItems(
+            reply([
+              ('fact', 1, 'Music', ''),
+              ('event', 2, '(crowd cheering)', '2026-11-18T05:25'),
+              ('fact', 3, 'Yes.', ''),
+              ('task', 4, 'set this new original version.', '2026-11-18T05:29'),
+              ('task', 5, "It's not that we have friends over and we're sent us to the original audition.", ''),
+              ('task', 6, 'Send us the original', '2026-11-18T05:28'),
+              ('event', 7, 'and friends over and over again set us the resolution', ''),
+              ('fact', 8, 'I need a replacement for lowkey', ''),
+            ]),
+            l),
+        isEmpty);
+  });
+
+  test("a due date the line never mentions is dropped, e.g. the prompt's own date copied in", () {
+    final l = lines(['Remember to renew the car insurance before it lapses']);
+    final item = parseItems(reply([('task', 1, 'Renew car insurance', '2026-11-18T05:31')]), l).single;
+    expect(item.dueMs, isNull);
+    expect(buildPrompt(l, null, DateTime(2026, 11, 18, 5, 31)), startsWith('Today is Wednesday 2026-11-18.\n'));
+  });
+
+  test('once you have a voice profile, a conversation you never spoke in is not read', () async {
+    final c = chunk(1); // time unknown, so no day summary is due either
+    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Officer, call dispatch about Westbrook tonight', voice: null)]);
+    db.db.execute("INSERT INTO voice_samples(embedding) VALUES (x'00')");
+    var calls = 0;
+    final s = UnderstandingService(db, Directory.systemTemp, mayRunNow: () async => true, generate: (_, _, _) async {
+      calls++;
+      return '{"items": []}';
+    });
+    await s.kick();
+    expect(calls, 0);
+    expect(db.nextUnextracted(), isNull);
   });
 
   test('items are saved per chunk and vanish when the chunk is re-transcribed', () {
@@ -70,7 +130,7 @@ void main() {
 
   test('the service drains the queue through generate and stops when not allowed', () async {
     final c = chunk(1);
-    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Call mum tonight', voice: null)]);
+    db.saveTranscript(c, [(startMs: 0, endMs: 900, text: 'Remind me to call mum tonight', voice: null)]);
     var allowed = false;
     final prompts = <String>[];
     final s = UnderstandingService(db, Directory.systemTemp, mayRunNow: () async => allowed, generate: (system, user, schema) async {
@@ -81,7 +141,7 @@ void main() {
     expect(db.items(), isEmpty);
     allowed = true;
     await s.kick();
-    expect(prompts.single, contains('1. Speaker: Call mum tonight'));
+    expect(prompts.single, contains('1. Speaker: Remind me to call mum tonight'));
     expect(db.items().single.text, 'Call mum');
   });
 
