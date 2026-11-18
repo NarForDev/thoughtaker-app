@@ -78,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       listenable: s.changes,
       builder: (context, _) {
         final wifiOnly = s.db.setting(wifiOnlyKey) != '0';
+        final p = s.pendant;
         return ScreenFrame(
           title: 'Settings',
           children: [
@@ -108,10 +109,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             else if (s.calendar.enabled)
               const Text('Done or dismissed items are removed from your calendar again.', style: TextStyles.caption),
             const SectionHeader('Wake word'),
-            const Text(
-                'Say "Perthro" to start or stop recording and "Perthro mark" to bookmark a moment. This arrives with '
-                'a pendant update; until then the pendant records whenever it hears speech.',
-                style: TextStyles.body),
+            PillToggle(
+                label: 'Start and stop with "Perthro"',
+                value: p.status?.wakeWord ?? false,
+                onChanged: p.connected && !p.busy && p.wakeWordBuilt != false ? p.setWakeWord : null),
+            const SizedBox(height: 6),
+            Text(
+                p.wakeWordBuilt == false
+                    ? "Your pendant's firmware doesn't have the wake word yet; it's still being trained. Until then "
+                        'the pendant records whenever it hears speech.'
+                    : !p.connected
+                        ? 'Connect the pendant to change this.'
+                        : p.status?.wakeWord ?? false
+                            ? 'Say "Perthro" to start or stop recording; it keeps the 30 s before you said it. '
+                                '"Perthro mark" bookmarks a moment, and "Perthro forget" twice deletes the last 5 minutes '
+                                'from the pendant.'
+                            : 'Off: the pendant records whenever it hears speech.',
+                style: TextStyles.caption),
             const SectionHeader('Voice profile'),
             ListRow(
               onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => VoicesScreen(s: s))),

@@ -1,9 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:thoughtaker_app/db.dart';
+import 'package:thoughtaker_app/protocol.dart';
 import 'package:thoughtaker_app/screens/home_screen.dart';
 import 'package:thoughtaker_app/conversations.dart';
+import 'package:thoughtaker_app/ui/format.dart';
 import 'package:thoughtaker_app/ui/painters.dart';
 import 'package:thoughtaker_app/ui/widgets.dart';
 
@@ -42,5 +46,13 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: ListRow(marked: true, child: Text('Send the deck'))));
     expect(tester.takeException(), isNull);
     expect(find.text('Send the deck'), findsOneWidget);
+  });
+
+  test('recordingLabel follows the status bits: muted, recording, waiting for the wake word', () {
+    DeviceStatus st(int state) => DeviceStatus.parse(Uint8List(32)..[2] = state, 0);
+    expect(recordingLabel(st(0x03)), 'Muted'); // muted wins
+    expect(recordingLabel(st(0x05)), 'Recording');
+    expect(recordingLabel(st(0x04)), 'Waiting for "Perthro"');
+    expect(recordingLabel(st(0x00)), 'Not recording'); // wake word off and not keeping audio: storage full or SD error
   });
 }

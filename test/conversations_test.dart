@@ -63,4 +63,15 @@ void main() {
     final v = groupConversations(db.chunks()).single;
     expect(v.bookmarks, 3);
   });
+
+  test('a gap in seq (pre-roll nobody said "Perthro" for) starts a new conversation even when times touch', () {
+    add(10, 0);
+    add(11, 60000);
+    add(14, 120000); // seq 12 and 13 were discarded pre-roll
+    add(15, 180000);
+    expect(groups(), [
+      [14, 15],
+      [10, 11],
+    ]);
+  });
 }

@@ -101,6 +101,22 @@ class PendantController extends ChangeNotifier {
         await _refreshStatus();
       });
 
+  /// False once the pendant said its firmware has no wake-word models; null until it was asked.
+  bool? wakeWordBuilt;
+
+  /// Turns "Perthro" on (audio is kept only after it is said) or off (the pendant records all the time).
+  Future<void> setWakeWord(bool on) => _guard('Wake word', () async {
+        try {
+          await _request(opSetWakeWord, [on ? 1 : 0]);
+          wakeWordBuilt = true;
+        } on DeviceError catch (e) {
+          if (e.status != errUnsupported) rethrow;
+          wakeWordBuilt = false;
+          return;
+        }
+        await _refreshStatus();
+      });
+
   Future<void> disconnect() async {
     final id = _deviceId;
     _dropLink('Disconnected');

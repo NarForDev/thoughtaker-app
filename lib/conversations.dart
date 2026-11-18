@@ -38,6 +38,8 @@ class Conversation {
 
 /// Groups chunks (store, seq order) into conversations, newest first: same store, consecutive seq,
 /// same speech state, and at most [maxGapMs] of silence between them when both times are known.
+/// A gap in seq means audio was not kept in between (pre-roll nobody said "Perthro" for, "Perthro forget",
+/// or a deleted chunk), so it always starts a new conversation.
 List<Conversation> groupConversations(List<Chunk> byStoreSeq) {
   final runs = <(List<Chunk>, int?)>[];
   int? prevAt;

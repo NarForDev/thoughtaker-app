@@ -369,6 +369,8 @@ class _PendantTile extends StatelessWidget {
             stat('${st.pendingChunks}', 'to sync'),
           ]),
           const SizedBox(height: 12),
+          Align(alignment: Alignment.centerLeft, child: Text(recordingLabel(st), style: TextStyles.label)),
+          const SizedBox(height: 8),
           PillToggle(label: 'Mute microphone', value: st.muted, onChanged: p.connected && !p.busy ? p.setMute : null),
         ],
         if (p.syncing) ...[const SizedBox(height: 12), DottedTrack(value: p.pullProgress)],

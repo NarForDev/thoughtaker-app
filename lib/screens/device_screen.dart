@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../ai/on_device_transcription.dart';
 import '../ai/understanding.dart';
 import '../pendant.dart';
+import '../ui/format.dart';
 import '../ui/painters.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart';
@@ -104,7 +105,7 @@ class DeviceScreen extends StatelessWidget {
                   Expanded(
                     child: Tile(
                       label: 'Recording',
-                      child: Text(s.muted ? 'Muted' : (s.recording ? 'Listening' : 'Idle'), style: TextStyles.title),
+                      child: Text(recordingLabel(s), style: TextStyles.title),
                     ),
                   ),
                 ]),
